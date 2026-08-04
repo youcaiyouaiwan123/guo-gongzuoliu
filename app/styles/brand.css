@@ -45,6 +45,52 @@
   background: #0c1d17;
   color: #9fb1aa;
 }
+/* 登录卡片：主题化提交按钮与细节打磨 */
+.loginCard .featureForm button,
+.authRegisterGrid .featureForm button {
+  margin-top: 4px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 12px 26px #0b6b4f33;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.loginCard .featureForm button:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 16px 32px #0b6b4f40;
+}
+.loginCard .featureForm button:active {
+  transform: translateY(1px);
+  box-shadow: 0 8px 18px #0b6b4f33;
+}
+.loginCard .featureForm button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--green-soft), 0 12px 26px #0b6b4f33;
+}
+.loginCard {
+  animation: loginCardIn 0.45s ease both;
+}
+.loginLogo {
+  animation: loginLogoIn 0.6s ease both;
+}
+@keyframes loginCardIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes loginLogoIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loginCard, .loginLogo { animation: none; }
+}
+
 @media (max-width: 900px) {
   .loginPage {
     grid-template-columns: 1fr;
@@ -80,3 +126,102 @@
   }
 }
 
+
+/* ============ 登录卡片重设计 v3 ============ */
+.loginCard.authUnifiedCard {
+  width: min(408px, calc(100% - 40px));
+  padding: 38px 38px 30px;
+  border-radius: 20px;
+  border: 1px solid #e9efeb;
+  background: #fff;
+  box-shadow: 0 20px 60px #07140f1f, 0 1px 3px #07140f0d;
+  gap: 0;
+}
+/* 头部：胶囊 + 标题 + 说明 */
+.authCardHead { display: grid; gap: 10px; margin-bottom: 22px; }
+.loginCard.authUnifiedCard h2 {
+  margin: 0;
+  font-size: 25px;
+  letter-spacing: .01em;
+  color: var(--ink);
+}
+.loginCard.authUnifiedCard > .authCardHead p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* 登录/注册：下划线式标签页，区别于顶部胶囊 */
+.authTabsLine {
+  display: flex;
+  gap: 22px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #eaf0ec;
+}
+.authTabsLine button {
+  border: 0;
+  background: transparent;
+  padding: 0 2px 11px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #93a099;
+  cursor: pointer;
+  position: relative;
+  transition: color .15s;
+}
+.authTabsLine button:hover:not(.active) { color: var(--green-dark); }
+.authTabsLine button.active { color: var(--green); }
+.authTabsLine button.active::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--green);
+}
+/* 表单 */
+.loginCard .featureForm { gap: 16px; }
+.loginCard .featureForm label {
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #33463e;
+}
+.loginCard .featureForm input {
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1px solid #dde5e0;
+  background: #fbfdfc;
+  font-size: 14px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.loginCard .featureForm input::placeholder { color: #aab4ae; }
+.loginCard .featureForm input:hover { border-color: #c6d2cc; }
+.loginCard .featureForm input:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+/* 主按钮 */
+.loginCard .featureForm button {
+  min-height: 48px;
+  margin-top: 6px;
+  border-radius: 12px;
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+/* 底部说明 + 提示条 */
+.loginCard.authUnifiedCard > small {
+  margin-top: 16px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #9aa49e;
+}
+.loginCard .noticeLine {
+  margin-top: 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}

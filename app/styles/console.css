@@ -41,10 +41,12 @@ nav button {
   align-items: center;
   justify-content: space-between;
   min-height: 28px;
-  padding: 5px 10px;
-  color: #8fa79e;
-  font-size: var(--sidebar-nav-font-size);
-  font-weight: 600;
+  padding: 7px 10px 5px;
+  color: #7f978e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
 }
 .sidebarNav .navGroupToggle:hover,
 .navGroup[data-expanded="true"] > .navGroupToggle {
@@ -55,9 +57,10 @@ nav button {
   color: #8fd3b6;
 }
 .sidebarNav .navGroupChevron {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
   transition: transform 0.16s ease;
 }
 .navGroup[data-expanded="true"] > .navGroupToggle .navGroupChevron {
@@ -419,6 +422,7 @@ header {
   }
   .sidebarNav .navGroupToggle {
     padding-inline: 8px;
+    font-size: 10.5px;
   }
   .sidebarNav {
     --sidebar-nav-font-size: 11px;

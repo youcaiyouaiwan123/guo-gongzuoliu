@@ -4,18 +4,10 @@ import { FormEvent, useState } from "react";
 import { log } from "./features/logger";
 
 export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?: boolean }) {
-  const [roleMode, setRoleMode] = useState<"user" | "admin">(initialAdminOnly ? "admin" : "user");
   const [mode, setMode] = useState<"login" | "register">("login");
   const [notice, setNotice] = useState("");
-  const adminOnly = roleMode === "admin";
+  const adminOnly = initialAdminOnly;
   const title = adminOnly ? "后台管理员登录" : "企业用户登录";
-
-  function switchRole(next: "user" | "admin") {
-    setRoleMode(next);
-    setNotice("");
-    if (next === "admin") setMode("login");
-    log.info("切换登录角色", { role: next });
-  }
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,26 +63,24 @@ export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?:
 
   return (
       <section className="loginCard authCard authUnifiedCard">
-        <h2>{title}</h2>
-        <p>请选择登录身份。管理员入口会校验后台权限，普通用户可完成邮箱注册。</p>
-        <div className="authRoleSwitch" aria-label="选择登录身份">
-          <button type="button" className={roleMode === "user" ? "active" : ""} onClick={() => switchRole("user")}>
-            用户登录
-          </button>
-          <button type="button" className={roleMode === "admin" ? "active" : ""} onClick={() => switchRole("admin")}>
-            管理员登录
-          </button>
+        <div className="authCardHead">
+          <h2>{title}</h2>
+          <p>
+            {adminOnly
+              ? "管理员入口会校验后台权限，请使用管理员账号登录。"
+              : "使用企业邮箱登录，或注册新的企业账号。"}
+          </p>
         </div>
-        <div className="authTabs">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-            邮箱登录
-          </button>
-          {!adminOnly && (
-            <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
+        {!adminOnly && (
+          <div className="authTabsLine" role="tablist" aria-label="登录或注册">
+            <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+              邮箱登录
+            </button>
+            <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
               邮箱注册
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {mode === "login" && (
           <form onSubmit={login} className="featureForm">

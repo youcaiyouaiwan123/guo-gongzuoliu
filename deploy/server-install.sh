@@ -63,10 +63,11 @@ if [[ ! -f "$SHARED_DIR/deploy/users.htpasswd" ]]; then
   fi
   ADMIN_HASH="$(openssl passwd -6 "$ADMIN_PASSWORD")"
   printf 'admin:%s\n' "$ADMIN_HASH" > "$SHARED_DIR/deploy/users.htpasswd"
-  chmod 600 "$SHARED_DIR/deploy/users.htpasswd"
+  # 644：文件内容是 bcrypt/sha 密码哈希，nginx worker（非 root）需可读，全局可读不泄露明文。
+  chmod 644 "$SHARED_DIR/deploy/users.htpasswd"
   echo "ADMIN_USER=admin"
 else
-  chmod 600 "$SHARED_DIR/deploy/users.htpasswd"
+  chmod 644 "$SHARED_DIR/deploy/users.htpasswd"
   echo "ADMIN_PASSWORD_EXISTS=1"
 fi
 
