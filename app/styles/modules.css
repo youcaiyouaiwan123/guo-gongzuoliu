@@ -1,0 +1,1177 @@
+/* 工作流启动条响应式：仅在 chatLayout 进入单列模式（≤980px）时才让
+   workflowLauncherHead 垂直堆叠；之前 1100px 的断点会让 1100-1280px
+   区间内出现“按钮竖排”观感，与三列 chatLayout 不匹配。 */
+@media (max-width: 980px) {
+  .workflowLauncherHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .suggestions {
+    width: 100%;
+  }
+  .workflowLauncherControls {
+    grid-template-columns: 1fr auto;
+  }
+}
+@media (max-width: 720px) {
+  .workflowLauncherControls {
+    grid-template-columns: 1fr;
+  }
+  .chatWorkflowLauncher {
+    padding-inline: 12px;
+  }
+}
+/* composer 紧凑化：
+   - 整体作为 chatPanel 的底部块，stuck 在底部
+   - 顶部一行：知识模式切换 + 上传附件
+   - 中部 textarea 自适应高度
+   - 底部提示文字
+   - 取消 17px 底部死区，改为 10px 间距 */
+.composer {
+  margin: 0 18px 10px;
+  border: 1px solid #ccd7d1;
+  border-radius: 13px;
+  padding: 6px 10px 8px;
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 0;
+  grid-template-columns: 1fr 44px;
+  align-items: end;
+  gap: 8px;
+  background: #ffffff;
+  box-shadow: 0 -2px 12px rgba(30, 65, 50, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.composer:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(8, 120, 95, 0.10), 0 -2px 12px rgba(30, 65, 50, 0.06);
+}
+.composer textarea {
+  border: 0;
+  outline: 0;
+  padding: 4px 6px;
+  min-width: 0;
+  min-height: 32px;
+  max-height: 160px;
+  field-sizing: content;
+  resize: none;
+  overflow-y: auto;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  background: transparent;
+}
+.composer > button {
+  border: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--green);
+  color: white;
+  font-size: 22px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(8, 120, 95, 0.25);
+}
+.composer > button:hover:not(:disabled) {
+  background: #0a8465;
+  transform: translateY(-1px);
+}
+.composer > button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+.composer small {
+  grid-column: 1 / -1;
+  color: #909a95;
+  font-size: 11px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+.knowledgeMode {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+.knowledgeMode button {
+  border: 1px solid #d3ddd8;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: #fff;
+  color: #68766f;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.knowledgeMode button:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.knowledgeMode button.active {
+  border-color: #7fb6a4;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 700;
+}
+.chatFileButton {
+  border: 1px solid #d8c18b;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #fffaf0;
+  color: #8a5a00;
+  font-size: 10px;
+  cursor: pointer;
+}
+.chatFileButton input {
+  display: none;
+}
+.chatAttachmentTray {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 5px;
+  padding: 2px 3px 4px;
+}
+.chatAttachmentItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px 46px;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid #d9e5df;
+  border-radius: 9px;
+  background: #f8fcfa;
+  padding: 5px 7px;
+}
+.chatAttachmentItem b,
+.chatAttachmentItem span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chatAttachmentItem b {
+  font-size: 11px;
+  color: var(--ink);
+}
+.chatAttachmentItem span {
+  color: #718079;
+  font-size: 9px;
+}
+.chatAttachmentItem select,
+.chatAttachmentItem button {
+  height: 28px;
+  border-radius: 8px;
+  font-size: 10px;
+}
+.chatAttachmentItem select {
+  border: 1px solid #cbd8d2;
+  background: #fff;
+  color: var(--ink);
+}
+.chatAttachmentItem button {
+  border: 1px solid #efc7c7;
+  background: #fff4f4;
+  color: #b4232f;
+  cursor: pointer;
+}
+.insightPanel {
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
+}
+.insightPanel h3 {
+  font-size: 13px;
+  margin: 0 0 14px;
+  color: #0d3a2e;
+  font-weight: 700;
+}
+.controlCard {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.controlCard span,
+.controlCard b,
+.controlCard small {
+  display: block;
+}
+.controlCard span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.controlCard b {
+  margin: 5px 0;
+  font-size: 13px;
+}
+.controlCard small {
+  color: #87918c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.viewAudit {
+  width: 100%;
+  margin-top: 18px;
+  border: 0;
+  background: var(--green-soft);
+  color: var(--green);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.contentPanel {
+  margin: 26px 38px;
+  padding: 26px;
+}
+.metricRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.metricRow article {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfb;
+}
+.metricRow span,
+.metricRow b,
+.metricRow small {
+  display: block;
+}
+.metricRow span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.metricRow b {
+  font-family: Georgia, serif;
+  margin: 8px 0 5px;
+  font-size: 26px;
+}
+.metricRow small {
+  color: #88948e;
+  font-size: 10px;
+}
+.sectionTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 30px 0 18px;
+}
+.sectionTitle h2 {
+  margin: 0 0 6px;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 20px;
+}
+.sectionTitle p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.policyBadge {
+  padding: 8px 12px;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 18px;
+  font-size: 11px;
+}
+.knowledgeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.knowledgeGrid article {
+  position: relative;
+  padding: 21px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.docIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 8px;
+}
+.knowledgeGrid h3 {
+  font-size: 14px;
+  margin: 18px 0 8px;
+}
+.knowledgeGrid p,
+.knowledgeGrid small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.knowledgeGrid small {
+  display: block;
+  margin-top: 14px;
+}
+.knowledgeGrid em {
+  position: absolute;
+  right: 14px;
+  top: 15px;
+  font-size: 9px;
+  color: var(--green);
+  font-style: normal;
+}
+.knowledgeGrid em.pending {
+  color: var(--amber);
+  background: #fff3dc;
+  padding: 4px 7px;
+  border-radius: 10px;
+}
+.knowledgeToolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 170px auto auto;
+  gap: 9px;
+  margin-bottom: 16px;
+  padding: 13px;
+  background: #f5f8f6;
+  border-radius: 10px;
+}
+.knowledgeToolbar input,
+.knowledgeToolbar select {
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px;
+  color: var(--ink);
+}
+.knowledgeToolbar button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  padding: 0 15px;
+  font-size: 10px;
+}
+.docActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+.docActions button,
+.docActions a {
+  border: 0;
+  border-radius: 7px;
+  background: var(--green);
+  color: #fff;
+  padding: 7px 9px;
+  font-size: 9px;
+  text-decoration: none;
+}
+/* 上传企业知识弹窗 - 左右双栏 */
+.knowledgeUploadModal {
+  width: min(960px, calc(100vw - 30px));
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.knowledgeUploadModal .modalHead { flex: 0 0 auto; }
+.uploadModeTabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 0 14px;
+  background: #f0f4f1;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+.uploadModeTabs button {
+  border: none;
+  background: transparent;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4a5d56;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.uploadModeTabs button:hover { color: #08765a; }
+.uploadModeTabs button.active {
+  background: #fff;
+  color: #08765a;
+  box-shadow: 0 2px 6px rgba(8, 118, 90, 0.12);
+}
+
+.uploadModalBody {
+  display: grid;
+  grid-template-columns: 0.95fr 1.05fr;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左侧 */
+.uploadLeftPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(180deg, #f6fbf8, #fbfdfb);
+  border: 1px solid #d7e8df;
+  border-radius: 12px;
+  padding: 14px;
+  overflow: hidden;
+}
+.uploadLeftPanel .fileDrop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 16px;
+  border: 2px dashed #b3d4c2;
+  border-radius: 10px;
+  background: #fff;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 0 !important;
+  min-height: 130px;
+  justify-content: center;
+  outline: none;
+}
+.uploadLeftPanel .fileDrop:hover,
+.uploadLeftPanel .fileDrop:focus-visible {
+  border-color: #08765a;
+  background: #f0f7f3;
+}
+.uploadLeftPanel .fileDrop:focus-visible {
+  box-shadow: 0 0 0 3px rgba(8, 118, 90, 0.18);
+}
+.uploadLeftPanel > input[type="file"] {
+  display: none;
+}
+.fileDropIcon {
+  font-size: 36px;
+  line-height: 1;
+  color: #08765a;
+}
+.uploadLeftPanel .fileDrop b {
+  color: #08765a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.uploadLeftPanel .fileDrop span {
+  color: #60766e;
+  font-size: 11px;
+}
+
+.uploadFileList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+.uploadFileListHead {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a5d56;
+  margin-bottom: 2px;
+}
+.uploadFileItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #d7e8df;
+  border-radius: 7px;
+}
+.uploadFileItem:hover {
+  background: #f0f7f3;
+  border-color: #08765a;
+}
+.uploadFileIcon {
+  font-size: 20px;
+  color: #08765a;
+  flex: 0 0 auto;
+}
+.uploadFileInfo {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.uploadFileInfo b {
+  font-size: 12px;
+  color: #1a3a2d;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uploadFileInfo small {
+  font-size: 10px;
+  color: #60766e;
+}
+
+.textModePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.textModePanel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a5d56;
+  margin: 0 !important;
+}
+.textModePanel input,
+.textModePanel textarea {
+  font-size: 12px !important;
+  padding: 7px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 7px !important;
+  background: #fff;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.uploadProgressBox {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #cfe1d7;
+  border-radius: 8px;
+}
+.uploadProgressBar {
+  height: 6px;
+  background: linear-gradient(90deg, #08765a, #0a8a6a);
+  border-radius: 3px;
+  transition: width 0.2s ease-out;
+  box-shadow: 0 0 8px rgba(8, 118, 90, 0.3);
+}
+.uploadProgressBox small {
+  font-size: 10px;
+  color: #08765a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 右侧 */
+.uploadRightPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.uploadSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.uploadSectionHead {
+  font-size: 11px;
+  font-weight: 700;
+  color: #08765a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #e8f0eb;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+.uploadSection label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a5d56;
+  margin: 0 !important;
+}
+.uploadSection input,
+.uploadSection select,
+.uploadSection textarea {
+  font-size: 12px !important;
+  padding: 6px 9px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: #fff;
+  font-family: inherit;
+}
+.uploadSection input:disabled,
+.uploadSection select:disabled,
+.uploadSection textarea:disabled {
+  background: #f4f7f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.uploadSection .uploadGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.uploadSection .uploadGrid label {
+  margin: 0;
+}
+
+.knowledgeUploadModal .modalActions {
+  flex: 0 0 auto;
+  border-top: 1px solid #e8f0eb;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+/* 响应式 */
+@media (max-width: 880px) {
+  .uploadModalBody {
+    grid-template-columns: 1fr;
+  }
+  .uploadRightPanel {
+    overflow-y: visible;
+  }
+}
+
+/* 知识库卡片：减少按钮噪音 */
+.knowledgeCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  min-height: 0;
+}
+.knowledgeCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  border-color: #cfe1d7;
+}
+.knowledgeCard .cardTopRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.knowledgeCard .docIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #e8f5ee, #f6fbf8);
+  color: #08765a;
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+.knowledgeCard .docIcon.personalIcon {
+  background: linear-gradient(135deg, #fef3e0, #fff8eb);
+  color: #c47d1d;
+  font-size: 14px;
+  font-weight: 700;
+}
+.knowledgeCard .itemSelect {
+  margin: 0 0 0 4px;
+  font-size: 11px;
+  color: #4a5d56;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.knowledgeCard .cardMenuWrap {
+  margin-left: auto;
+  position: relative;
+}
+.knowledgeCard .cardMenuTrigger {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #4a5d56;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.knowledgeCard .cardMenuTrigger:hover {
+  background: #e8f0eb;
+  color: #08765a;
+}
+.knowledgeCard .cardMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.knowledgeCard .cardMenu button,
+.knowledgeCard .cardMenu a {
+  display: block;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #24453a;
+  text-align: left;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.knowledgeCard .cardMenu button:hover,
+.knowledgeCard .cardMenu a:hover {
+  background: #f0f7f3;
+  color: #08765a;
+}
+.knowledgeCard .cardMenu .menuDanger {
+  color: #ad3b3b;
+  border-top: 1px solid #f0f4f1;
+  border-radius: 0 0 5px 5px;
+  margin-top: 2px;
+}
+.knowledgeCard .cardMenu .menuDanger:hover {
+  background: #fff4f4;
+  color: #ad3b3b;
+}
+.knowledgeCard h3 {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a3a2d;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.knowledgeCard .docMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #4a5d56;
+  flex-wrap: wrap;
+}
+.knowledgeCard .docMetaRow .docDot { color: #b6c4bd; }
+.knowledgeCard .docMetaRow em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 7px;
+  background: #e6f4ee;
+  color: #08765a;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.knowledgeCard .docMetaRow em.pending {
+  background: #fff4d6;
+  color: #c47d1d;
+}
+.knowledgeCard .docFilename {
+  margin: 0;
+  font-size: 11px;
+  color: #60766e;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+.knowledgeCard .docFilename small {
+  color: #8b9791;
+}
+.knowledgeCard .docUpdateMode {
+  font-size: 10px;
+  color: #8b9791;
+  font-variant-numeric: tabular-nums;
+}
+.knowledgeCard .cardPrimaryAction {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f4f1;
+}
+.knowledgeCard .askAiButton {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid #08765a;
+  background: linear-gradient(135deg, #f0f7f3, #fff);
+  color: #08765a;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.knowledgeCard .askAiButton:hover {
+  background: linear-gradient(135deg, #08765a, #0a8a6a);
+  color: #fff;
+  border-color: #08765a;
+  box-shadow: 0 4px 10px rgba(8, 118, 90, 0.2);
+}
+.fileDrop {
+  display: grid !important;
+  place-items: center;
+  gap: 6px !important;
+  padding: 22px !important;
+  border: 1px dashed #9db6aa !important;
+  border-radius: 11px;
+  background: var(--green-soft);
+  text-align: center;
+  cursor: pointer;
+}
+.fileDrop input {
+  width: auto !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+.fileDrop b {
+  color: var(--green);
+  font-size: 13px;
+}
+.fileDrop span {
+  color: var(--muted);
+  font-size: 9px;
+}
+.uploadDivider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8b9791;
+  font-size: 9px;
+}
+.uploadDivider:before,
+.uploadDivider:after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.uploadGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.uploadGrid label {
+  margin: 0;
+}
+.uploadGrid .wide {
+  grid-column: 1/-1;
+}
+.knowledgeSwitch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 4px 0 22px;
+  background: #edf4f1;
+  border: 1px solid #d8e4df;
+  border-radius: 12px;
+}
+.knowledgeSwitch button {
+  background: transparent;
+  color: #35574d;
+  border: 0;
+  box-shadow: none;
+  padding: 10px 18px;
+}
+.knowledgeSwitch button.active {
+  background: #08785f;
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(8, 120, 95, 0.18);
+}
+.personalKnowledgeCard {
+  border-color: #cfe4dc;
+  background: linear-gradient(180deg, #fff 0%, #fbfefd 100%);
+}
+.messageKnowledgeButton {
+  display: block !important;
+  width: max-content !important;
+  margin-top: 9px !important;
+  padding: 5px 9px !important;
+  border: 1px solid #c8ddd5 !important;
+  border-radius: 8px !important;
+  background: #f7fbf9 !important;
+  color: #08785f !important;
+  font-size: 9px !important;
+  box-shadow: none !important;
+  opacity: 0.82;
+}
+.messageKnowledgeButton:hover {
+  opacity: 1;
+  background: #eaf6f1 !important;
+}
+.moduleActions {
+  grid-column: 2/-1;
+  display: flex;
+  gap: 7px;
+}
+.moduleGrid .moduleActions button {
+  grid-column: auto;
+  flex: 1;
+}
+.dangerButton {
+  background: #f9eaea !important;
+  color: var(--red) !important;
+  border: 1px solid #efd0d0 !important;
+}
+.dangerButton:hover {
+  background: #f4dcdc !important;
+}
+.docActions .dangerButton {
+  margin-left: auto;
+}
+.approvalState.已撤回 {
+  background: #eef0ef;
+  color: #68766f;
+}
+.modelForm {
+  grid-template-columns: 1.1fr 1fr 1.5fr 1fr 1fr auto;
+}
+.modelConnectionList {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 24px;
+}
+.modelConnectionList article {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfb;
+}
+.modelConnectionList article div {
+  min-width: 0;
+}
+.modelConnectionList b,
+.modelConnectionList p,
+.modelConnectionList small {
+  display: block;
+  margin: 0;
+}
+.modelConnectionList p {
+  margin-top: 4px;
+  color: #50635a;
+  font-size: 10px;
+}
+.modelConnectionList small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modelConnectionList em {
+  font-style: normal;
+  color: var(--green);
+  font-size: 9px;
+  background: var(--green-soft);
+  padding: 5px 8px;
+  border-radius: 12px;
+}
+.modelConnectionList button {
+  border: 0;
+  border-radius: 7px;
+  background: var(--green);
+  color: #fff;
+  padding: 7px 10px;
+  font-size: 9px;
+}
+.presetModelSection {
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fbfcfb;
+}
+.presetModelHeading,
+.customModelToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.presetModelHeading h3,
+.customModelToggle h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.presetModelHeading p,
+.customModelToggle p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.presetModelHeading > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+.presetModelHeading span {
+  color: var(--green);
+  font-size: 10px;
+}
+.selectAllModels {
+  border-color: var(--green) !important;
+  background: var(--green) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+.presetVendorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.presetVendorGrid > article {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.presetVendorGrid header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.presetVendorGrid header div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.presetVendorGrid header b {
+  font-size: 12px;
+}
+.presetVendorGrid header small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.vendorSelectAll {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--green);
+  padding: 6px 9px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.vendorSelectAll:hover {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.presetModelChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.presetModelChoices label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #44544d;
+  font-size: 9px;
+  cursor: pointer;
+}
+.presetModelChoices label.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+.presetModelChoices input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--green);
+}
+.presetAddBar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.presetAddBar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.presetAddBar input {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.presetAddBar button {
+  height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+}
+.presetAddBar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.customModelToggle {
+  margin: 14px 0;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}

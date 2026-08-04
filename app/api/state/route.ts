@@ -1,0 +1,281 @@
+// 企业知识库：文档管理、搜索、审计日志。
+// 使用 Hono 中间件统一处理认证和错误响应。
+import { env } from "cloudflare:workers";
+import { createApp, auth, success, fail, authorizeCapability, ADMIN_ROLE } from "../_app";
+import { extractTextFromFile } from "../_fileText";
+import { ensureColumn } from "../_schema";
+
+type RuntimeEnv = { DB: D1Database; FILES: R2Bucket };
+const runtime = env as unknown as RuntimeEnv;
+
+const fields = "id,title,content,visibility,department_id AS departmentId,filename,mime_type AS mimeType,category,tags,version,update_mode AS updateMode,update_schedule AS updateSchedule,status,size_bytes AS sizeBytes,created_by AS createdBy,created_at AS createdAt,updated_at AS updatedAt";
+
+async function ensureSchema() {
+  await runtime.DB.batch([
+    runtime.DB.prepare(`CREATE TABLE IF NOT EXISTS knowledge_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT '全员',
+      department_id INTEGER,
+      filename TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT 'text/plain',
+      file_key TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '未分类',
+      tags TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      update_mode TEXT NOT NULL DEFAULT '手动更新',
+      update_schedule TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT '已解析',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT ''
+    )`),
+    runtime.DB.prepare("CREATE INDEX IF NOT EXISTS knowledge_documents_updated_idx ON knowledge_documents(updated_at)"),
+    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (id INTEGER PRIMARY KEY AUTOINCREMENT,unit_id INTEGER NOT NULL,email TEXT NOT NULL,position TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在职',created_at TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT '')"),
+    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,resource TEXT NOT NULL,result TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL)"),
+  ]);
+  await ensureColumn(runtime.DB, "knowledge_documents", "department_id", "INTEGER");
+}
+
+function isFullVisibility(value?: string | null) {
+  return value === "全员" || String(value || "").includes("鍏ㄥ憳");
+}
+
+function isDepartmentVisibility(value?: string | null) {
+  return value === "部门" || String(value || "").includes("閮ㄩ棬");
+}
+
+function safeDownloadName(title: string, mimeType: string, filename = "") {
+  if (filename?.trim()) return filename.trim();
+  const extension = mimeType.includes("json") ? "json" : mimeType.includes("plain") ? "txt" : "md";
+  const base = (title || "knowledge").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_").slice(0, 80) || "knowledge";
+  return `${base}.${extension}`;
+}
+
+function canReadKnowledge(item: { visibility?: string; departmentId?: number | null }, unitId?: number | null, role?: string, businessRole?: string) {
+  if (role === ADMIN_ROLE || String(role || "").includes("绠＄悊")) return true;
+  if (isFullVisibility(item.visibility)) return true;
+  if (isDepartmentVisibility(item.visibility) && item.departmentId && item.departmentId === unitId) return true;
+  return item.visibility === businessRole;
+}
+
+async function getMembership(email: string) {
+  return runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=? AND status <> '离职' ORDER BY id DESC LIMIT 1")
+    .bind(email)
+    .first<{ unitId: number }>();
+}
+
+function parseIdsFromUrl(url: URL) {
+  return (url.searchParams.get("ids") || "")
+    .split(",")
+    .map(Number)
+    .filter(id => Number.isInteger(id) && id > 0)
+    .slice(0, 500);
+}
+
+const app = createApp();
+app.use("*", auth());
+
+// GET /api/state — 获取知识库文档列表、搜索、下载
+app.get("*", async (c) => {
+  const { user } = c.var;
+  await ensureSchema();
+
+  const url = new URL(c.req.url);
+  const membership = await getMembership(user.email);
+  const downloadId = Number(url.searchParams.get("download"));
+
+  if (downloadId) {
+    const item = await runtime.DB.prepare(`SELECT id,title,content,filename,mime_type AS mimeType,file_key AS fileKey,visibility,department_id AS departmentId FROM knowledge_documents WHERE id=?`)
+      .bind(downloadId)
+      .first<{ id: number; title: string; content: string; filename: string; mimeType: string; fileKey: string; visibility: string; departmentId?: number }>();
+    if (!item || !canReadKnowledge(item, membership?.unitId, user.role, user.businessRole)) {
+      return new Response("无权访问或文件不存在", { status: 404 });
+    }
+    const mimeType = item.mimeType || "text/markdown;charset=utf-8";
+    const downloadName = safeDownloadName(item.title, mimeType, item.filename);
+    if (!item.fileKey && item.content) {
+      return new Response(item.content, {
+        headers: {
+          "Content-Type": mimeType,
+          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+        },
+      });
+    }
+    const object = item.fileKey ? await runtime.FILES.get(item.fileKey) : null;
+    if (!object) return new Response("原文件不存在", { status: 404 });
+    return new Response(object.body, {
+      headers: {
+        "Content-Type": mimeType,
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+      },
+    });
+  }
+
+  const q = url.searchParams.get("q")?.trim();
+  const category = url.searchParams.get("category")?.trim();
+  let sql = `SELECT ${fields} FROM knowledge_documents WHERE (visibility IN ('全员','鍏ㄥ憳') OR visibility=? OR (visibility IN ('部门','閮ㄩ棬') AND department_id=?) OR ?=1)`;
+  const bindings: unknown[] = [user.businessRole, membership?.unitId || -1, user.role === ADMIN_ROLE ? 1 : 0];
+  if (q) {
+    sql += " AND (title LIKE ? OR filename LIKE ? OR tags LIKE ? OR content LIKE ?)";
+    const like = `%${q}%`;
+    bindings.push(like, like, like, like);
+  }
+  if (category && category !== "全部分类" && category !== "鍏ㄩ儴鍒嗙被") {
+    sql += " AND category=?";
+    bindings.push(category);
+  }
+  sql += " ORDER BY updated_at DESC,id DESC LIMIT 100";
+
+  const documents = await runtime.DB.prepare(sql).bind(...bindings).all();
+  const logs = await runtime.DB.prepare("SELECT id,actor,action,resource,result,detail,created_at AS createdAt FROM audit_logs ORDER BY id DESC LIMIT 100").all();
+  return success({ documents: documents.results || [], logs: logs.results || [] });
+});
+
+// POST /api/state — 添加知识库文档（表单或 JSON）
+app.post("*", async (c) => {
+  const { user } = c.var;
+  await ensureSchema();
+  const denied = await authorizeCapability(runtime.DB, user, "manage_knowledge");
+  if (denied) return denied;
+
+  const actor = user.email;
+  const now = new Date().toISOString();
+  const request = c.req.raw;
+  const contentType = request.headers.get("content-type") || "";
+  const membership = await getMembership(actor);
+
+  if (contentType.includes("multipart/form-data")) {
+    const form = await request.formData();
+    const files = form.getAll("files").filter((value): value is File => value instanceof File && value.size > 0);
+    if (!files.length) return fail("请选择文件。", 400);
+    if (files.some(file => file.size > 30 * 1024 * 1024)) return fail("单个文件不能超过 30MB。", 400);
+
+    const category = String(form.get("category") || "未分类");
+    const tags = String(form.get("tags") || "");
+    const visibility = String(form.get("visibility") || "全员");
+    const requestedDepartmentId = Number(form.get("departmentId")) || null;
+    const departmentId = user.role === ADMIN_ROLE ? requestedDepartmentId : membership?.unitId || null;
+    if (visibility === "部门" && !departmentId) return fail("请先加入部门，或由管理员选择资料所属部门。", 400);
+    const updateMode = String(form.get("updateMode") || "手动更新");
+    const updateSchedule = String(form.get("updateSchedule") || "");
+    const saved = [];
+
+    for (const file of files) {
+      const key = `knowledge/${crypto.randomUUID()}/${file.name}`;
+      await runtime.FILES.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type || "application/octet-stream" },
+        customMetadata: { owner: actor },
+      });
+      const extracted = await extractTextFromFile(file);
+      const title = file.name.replace(/\.[^.]+$/, "") || file.name;
+      const row = await runtime.DB.prepare(`INSERT INTO knowledge_documents(title,content,visibility,department_id,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING ${fields}`)
+        .bind(title, extracted.content, visibility, departmentId, file.name, extracted.mimeType, key, category, tags, 1, updateMode, updateSchedule, extracted.status, file.size, actor, now, now)
+        .first();
+      saved.push(row);
+      await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+        .bind(actor, "上传知识文件", file.name, "成功", `${category} · ${visibility} · ${extracted.note}`, now)
+        .run();
+    }
+    return success({ documents: saved }, 201);
+  }
+
+  const body = await c.req.json() as { type?: string; title?: string; content?: string; visibility?: string; departmentId?: number; category?: string; tags?: string; updateMode?: string; updateSchedule?: string };
+  const title = body.title?.trim();
+  const content = body.content?.trim();
+  if (body.type !== "document" || !title || !content) return fail("请填写资料名称和内容。", 400);
+
+  const visibility = body.visibility || "全员";
+  const departmentId = user.role === ADMIN_ROLE ? Number(body.departmentId) || null : membership?.unitId || null;
+  if (visibility === "部门" && !departmentId) return fail("请先加入部门，或由管理员选择资料所属部门。", 400);
+
+  const saved = await runtime.DB.prepare(`INSERT INTO knowledge_documents(title,content,visibility,department_id,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING ${fields}`)
+    .bind(title, content, visibility, departmentId, `${title}.md`, "text/markdown", "", body.category || "未分类", body.tags || "", 1, body.updateMode || "手动更新", body.updateSchedule || "", "已解析", new TextEncoder().encode(content).byteLength, actor, now, now)
+    .first();
+  await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+    .bind(actor, "添加知识", title, "成功", `${body.category || "未分类"} · ${visibility}`, now)
+    .run();
+  return success({ document: saved }, 201);
+});
+
+// DELETE /api/state — 删除知识库文档或审计记录
+app.delete("*", async (c) => {
+  const { user } = c.var;
+  await ensureSchema();
+  const url = new URL(c.req.url);
+
+  const allAuditLogs = url.searchParams.get("allAuditLogs") === "true";
+  const auditLogIds = (url.searchParams.get("auditLogIds") || "").split(",").map(Number).filter(id => Number.isInteger(id) && id > 0).slice(0, 500);
+  if (allAuditLogs || auditLogIds.length) {
+    if (user.role !== ADMIN_ROLE) return fail("只有管理员可以删除审计记录。", 403);
+    if (allAuditLogs) {
+      await runtime.DB.prepare("DELETE FROM audit_logs").run();
+      return success({ ok: true, message: "全部审计记录已删除。" });
+    }
+    const placeholders = auditLogIds.map(() => "?").join(",");
+    await runtime.DB.prepare(`DELETE FROM audit_logs WHERE id IN (${placeholders})`).bind(...auditLogIds).run();
+    return success({ ok: true, message: `已删除 ${auditLogIds.length} 条审计记录。` });
+  }
+
+  const auditLogId = Number(url.searchParams.get("auditLogId"));
+  if (Number.isInteger(auditLogId) && auditLogId > 0) {
+    if (user.role !== ADMIN_ROLE) return fail("只有管理员可以删除审计记录。", 403);
+    await runtime.DB.prepare("DELETE FROM audit_logs WHERE id=?").bind(auditLogId).run();
+    return success({ ok: true, message: "审计记录已删除。" });
+  }
+
+  const denied = await authorizeCapability(runtime.DB, user, "manage_knowledge");
+  if (denied) return denied;
+
+  let ids = parseIdsFromUrl(url);
+  if (!ids.length) {
+    const id = Number(url.searchParams.get("id"));
+    if (Number.isInteger(id) && id > 0) ids = [id];
+  }
+  if (!ids.length) {
+    const body = await c.req.json().catch(() => ({})) as { ids?: unknown[]; id?: unknown };
+    ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(id => Number.isInteger(id) && id > 0).slice(0, 500) : [Number(body.id)].filter(id => Number.isInteger(id) && id > 0);
+  }
+  if (!ids.length) return fail("请选择要删除的知识资料。", 400);
+
+  const deletedTitles: string[] = [];
+  for (const id of ids) {
+    const item = await runtime.DB.prepare("SELECT title,file_key AS fileKey,created_by AS createdBy FROM knowledge_documents WHERE id=?")
+      .bind(id)
+      .first<{ title: string; fileKey?: string; createdBy: string }>();
+    if (!item) continue;
+    if (user.role !== ADMIN_ROLE && item.createdBy !== user.email) continue;
+    if (item.fileKey) await runtime.FILES.delete(item.fileKey).catch(() => undefined);
+    await runtime.DB.prepare("DELETE FROM knowledge_documents WHERE id=?").bind(id).run();
+    deletedTitles.push(item.title);
+  }
+
+  if (!deletedTitles.length) return fail("资料不存在，或当前账号无权删除。", 404);
+  await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+    .bind(user.email, deletedTitles.length > 1 ? "批量删除知识资料" : "删除知识资料", deletedTitles.join("、"), "成功", "资料记录和原始文件已删除。", new Date().toISOString())
+    .run();
+  return success({ ok: true, message: `已删除 ${deletedTitles.length} 条知识资料。`, deleted: deletedTitles.length });
+});
+
+// PATCH /api/state — 同步知识库文档
+app.patch("*", async (c) => {
+  const { user } = c.var;
+  await ensureSchema();
+  const denied = await authorizeCapability(runtime.DB, user, "manage_knowledge");
+  if (denied) return denied;
+  const body = await c.req.json() as { id?: number; action?: string };
+  if (body.action !== "sync" || !body.id) return fail("操作无效。", 400);
+  const now = new Date().toISOString();
+  await runtime.DB.prepare("UPDATE knowledge_documents SET status=CASE WHEN content='' THEN '待解析' ELSE '已解析' END,updated_at=? WHERE id=?").bind(now, body.id).run();
+  await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+    .bind(user.email, "同步知识", String(body.id), "成功", "已检查更新并刷新检索状态。", now)
+    .run();
+  return success({ message: "已检查更新。" });
+});
+
+export const GET = (request: Request) => app.fetch(request);
+export const POST = (request: Request) => app.fetch(request);
+export const DELETE = (request: Request) => app.fetch(request);
+export const PATCH = (request: Request) => app.fetch(request);

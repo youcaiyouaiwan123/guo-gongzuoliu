@@ -1,0 +1,409 @@
+{
+  "generatedAt": "2026-07-30T13:56:46.087Z",
+  "applicationOrigin": "http://localhost:3000",
+  "total": 57,
+  "passed": 48,
+  "limited": 4,
+  "failed": 5,
+  "results": [
+    {
+      "section": "基础环境",
+      "item": "管理员登录",
+      "status": "通过",
+      "detail": "默认管理员完成真实登录，会话 Cookie 生效。",
+      "evidence": "POST /api/auth/login"
+    },
+    {
+      "section": "页面逐项",
+      "item": "智能助手",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 40 个，表单控件 2 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "图文视频生成",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 40 个，表单控件 18 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "沉淀中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 1 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "企业知识",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "智能体中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "自动化工作流",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "数据采集",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "企业架构",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "监控看板",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 25 个，表单控件 4 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "合同中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 27 个，表单控件 7 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "审批中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "模型接入",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "平台接入",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "权限中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "审计日志",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "账号管理",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "个人中心",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "页面逐项",
+      "item": "使用说明",
+      "status": "通过",
+      "detail": "页头、活动状态和内容区正常；可操作按钮 24 个，表单控件 0 个。",
+      "evidence": "Chrome CDP DOM"
+    },
+    {
+      "section": "接口逐项",
+      "item": "会话",
+      "status": "通过",
+      "detail": "GET /api/session 返回 HTTP 200。",
+      "evidence": "/api/session"
+    },
+    {
+      "section": "接口逐项",
+      "item": "企业知识与审计",
+      "status": "通过",
+      "detail": "GET /api/state 返回 HTTP 200。",
+      "evidence": "/api/state"
+    },
+    {
+      "section": "接口逐项",
+      "item": "智能助手",
+      "status": "通过",
+      "detail": "GET /api/chat 返回 HTTP 200。",
+      "evidence": "/api/chat"
+    },
+    {
+      "section": "接口逐项",
+      "item": "沉淀中心",
+      "status": "通过",
+      "detail": "GET /api/artifacts 返回 HTTP 200。",
+      "evidence": "/api/artifacts"
+    },
+    {
+      "section": "接口逐项",
+      "item": "个人知识",
+      "status": "通过",
+      "detail": "GET /api/personal-knowledge 返回 HTTP 200。",
+      "evidence": "/api/personal-knowledge"
+    },
+    {
+      "section": "接口逐项",
+      "item": "自动化模块",
+      "status": "通过",
+      "detail": "GET /api/modules 返回 HTTP 200。",
+      "evidence": "/api/modules"
+    },
+    {
+      "section": "接口逐项",
+      "item": "企业架构",
+      "status": "失败",
+      "detail": "企业架构读取失败：HTTP 500\n\nfalse !== true\n",
+      "evidence": ""
+    },
+    {
+      "section": "接口逐项",
+      "item": "审批与权限",
+      "status": "失败",
+      "detail": "审批与权限读取失败：HTTP 500\n\nfalse !== true\n",
+      "evidence": ""
+    },
+    {
+      "section": "接口逐项",
+      "item": "模型接入",
+      "status": "通过",
+      "detail": "GET /api/model 返回 HTTP 200。",
+      "evidence": "/api/model"
+    },
+    {
+      "section": "接口逐项",
+      "item": "平台接入",
+      "status": "通过",
+      "detail": "GET /api/connectors 返回 HTTP 200。",
+      "evidence": "/api/connectors"
+    },
+    {
+      "section": "接口逐项",
+      "item": "监控看板",
+      "status": "通过",
+      "detail": "GET /api/monitoring 返回 HTTP 200。",
+      "evidence": "/api/monitoring"
+    },
+    {
+      "section": "接口逐项",
+      "item": "合同中心",
+      "status": "通过",
+      "detail": "GET /api/contracts 返回 HTTP 200。",
+      "evidence": "/api/contracts"
+    },
+    {
+      "section": "接口逐项",
+      "item": "个人中心",
+      "status": "通过",
+      "detail": "GET /api/profile 返回 HTTP 200。",
+      "evidence": "/api/profile"
+    },
+    {
+      "section": "接口逐项",
+      "item": "账号管理",
+      "status": "通过",
+      "detail": "GET /api/users 返回 HTTP 200。",
+      "evidence": "/api/users"
+    },
+    {
+      "section": "接口逐项",
+      "item": "系统邮件",
+      "status": "通过",
+      "detail": "GET /api/admin/settings 返回 HTTP 200。",
+      "evidence": "/api/admin/settings"
+    },
+    {
+      "section": "接口逐项",
+      "item": "图片模型",
+      "status": "通过",
+      "detail": "GET /api/image-models 返回 HTTP 200。",
+      "evidence": "/api/image-models"
+    },
+    {
+      "section": "接口逐项",
+      "item": "生图记录",
+      "status": "通过",
+      "detail": "GET /api/image-generate 返回 HTTP 200。",
+      "evidence": "/api/image-generate"
+    },
+    {
+      "section": "核心工作",
+      "item": "智能助手任务管理",
+      "status": "通过",
+      "detail": "创建、重命名、读取和删除任务闭环通过；未调用付费模型。",
+      "evidence": "/api/chat"
+    },
+    {
+      "section": "核心工作",
+      "item": "图文视频生成",
+      "status": "受限",
+      "detail": "页面与接口正常，但文字模型和图片模型均未配置；接口返回明确配置提示，未执行真实生图。",
+      "evidence": "/api/image-models"
+    },
+    {
+      "section": "核心工作",
+      "item": "沉淀中心",
+      "status": "通过",
+      "detail": "Markdown 沉淀的保存、列表读取和删除闭环通过。",
+      "evidence": "/api/artifacts"
+    },
+    {
+      "section": "知识与自动化",
+      "item": "企业知识",
+      "status": "通过",
+      "detail": "在线资料保存、更新检查和删除闭环通过。",
+      "evidence": "/api/state"
+    },
+    {
+      "section": "知识与自动化",
+      "item": "个人知识",
+      "status": "通过",
+      "detail": "个人知识保存、本人列表读取和删除闭环通过。",
+      "evidence": "/api/personal-knowledge"
+    },
+    {
+      "section": "知识与自动化",
+      "item": "智能体中心",
+      "status": "通过",
+      "detail": "智能体定义创建、读取和删除通过；实际回答受模型未配置限制。",
+      "evidence": "/api/modules"
+    },
+    {
+      "section": "知识与自动化",
+      "item": "自动化工作流",
+      "status": "通过",
+      "detail": "两步工作流定义创建、读取和删除通过；未创建不可无痕清理的运行历史。",
+      "evidence": "/api/modules"
+    },
+    {
+      "section": "知识与自动化",
+      "item": "数据采集",
+      "status": "通过",
+      "detail": "手动数据源创建、CSV 样本识别、采集预览和删除闭环通过；测试模式按设计不写运行记录。",
+      "evidence": "/api/modules"
+    },
+    {
+      "section": "企业运营",
+      "item": "企业架构",
+      "status": "失败",
+      "detail": "读取组织节点失败：HTTP 500\n\nfalse !== true\n",
+      "evidence": ""
+    },
+    {
+      "section": "企业运营",
+      "item": "监控看板",
+      "status": "通过",
+      "detail": "CSV 解析、指标计算、报表保存、列表读取和删除闭环通过。",
+      "evidence": "/api/monitoring"
+    },
+    {
+      "section": "企业运营",
+      "item": "合同中心",
+      "status": "通过",
+      "detail": "模板保存、变量识别、合同生成、PDF 下载和删除闭环通过。",
+      "evidence": "/api/contracts"
+    },
+    {
+      "section": "企业运营",
+      "item": "审批中心",
+      "status": "失败",
+      "detail": "读取审批列表失败：HTTP 500\n\nfalse !== true\n",
+      "evidence": ""
+    },
+    {
+      "section": "系统与接入",
+      "item": "模型接入",
+      "status": "受限",
+      "detail": "模型配置接口正常，但当前没有模型连接，AI 对话、智能体回答和 AI 工作流不能真实执行。",
+      "evidence": "/api/model"
+    },
+    {
+      "section": "系统与接入",
+      "item": "平台接入",
+      "status": "受限",
+      "detail": "平台列表接口正常；已配置 0 个，真实网关在线 0 个，无法执行飞书/钉钉/企业微信收发验收。",
+      "evidence": "/api/connectors"
+    },
+    {
+      "section": "系统与接入",
+      "item": "权限中心",
+      "status": "失败",
+      "detail": "读取权限目录失败：HTTP 500\n\nfalse !== true\n",
+      "evidence": ""
+    },
+    {
+      "section": "系统与接入",
+      "item": "账号管理",
+      "status": "通过",
+      "detail": "普通员工账号创建、角色读取和删除闭环通过。",
+      "evidence": "/api/users"
+    },
+    {
+      "section": "系统与接入",
+      "item": "审计日志",
+      "status": "通过",
+      "detail": "本轮业务操作产生 20 条可读取审计记录，测试结束后统一清理。",
+      "evidence": "/api/state"
+    },
+    {
+      "section": "账户与帮助",
+      "item": "个人中心",
+      "status": "通过",
+      "detail": "资料读取和密码强度校验通过；未修改当前管理员密码或会话。",
+      "evidence": "/api/profile"
+    },
+    {
+      "section": "账户与帮助",
+      "item": "系统邮件与注册",
+      "status": "受限",
+      "detail": "SMTP 配置接口正常，但配置不完整，邮箱验证码注册当前不可用。",
+      "evidence": "/api/admin/settings"
+    },
+    {
+      "section": "账户与帮助",
+      "item": "使用说明",
+      "status": "通过",
+      "detail": "帮助内容已渲染，共 428 个文本字符。",
+      "evidence": "18-help.png"
+    },
+    {
+      "section": "浏览器运行时",
+      "item": "控制台与页面异常",
+      "status": "通过",
+      "detail": "逐页切换期间未捕获未处理异常或 console.error。",
+      "evidence": "Chrome CDP Runtime"
+    }
+  ]
+}

@@ -1,0 +1,618 @@
+/* ============================================================
+   图文视频生成页 - 三列等高 + 大字号 + 弹性填满
+   核心原则：
+   1) 三列 panel 高度严格一致（align-items: stretch + flex）
+   2) panel 内部 flex column：标题固定 + 内容弹性占满
+   3) 字号全部放大到 12-14px 可读
+   4) 控件 padding 加大、line-height 1.5
+   5) 列内禁止滚动条（除结果区有图片时）
+   6) 文生图区：内容分两屏横向滚动 tab（控件 / 提示词）
+   ============================================================ */
+
+.mediaPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+  padding: 12px 16px 14px;
+  overflow: hidden;
+}
+
+/* ---------- 1. 模型管理区：单行紧凑 ---------- */
+.mediaPanel > .mediaModelCard {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+.mediaPanel .mediaModelCard .inlineTitle {
+  flex: 0 0 auto;
+}
+.mediaPanel .mediaModelForm {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(110px, 0.9fr) minmax(140px, 1.2fr) minmax(140px, 1fr) minmax(140px, 1.2fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+}
+.mediaPanel .mediaModelForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: #24453a;
+  font-weight: 700;
+}
+.mediaPanel .mediaModelForm input,
+.mediaPanel .mediaModelForm select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  line-height: 1.4;
+}
+.mediaPanel .mediaFormActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.mediaPanel .saveImageModelButton {
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  border-color: #08765a;
+  padding: 8px 16px;
+  font-size: 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.mediaPanel .mediaFormActions .outline {
+  padding: 8px 14px;
+  font-size: 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* 预设 chips 横向滚动播放（marquee）：放大字号 + 无限循环 */
+.mediaPanel .presetMarquee {
+  flex: 0 0 auto;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+}
+.mediaPanel .presetMarquee .presetTrack {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  width: max-content;
+  animation: presetScroll 28s linear infinite;
+}
+.mediaPanel .presetMarquee:hover .presetTrack {
+  animation-play-state: paused;
+}
+.mediaPanel .presetMarquee .chipButton {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #f0f7f3;
+  border: 1px solid #cfe1d7;
+  color: #0a4d3a;
+  white-space: nowrap;
+  cursor: pointer;
+  line-height: 1.3;
+  transition: background 0.15s, transform 0.15s;
+}
+.mediaPanel .presetMarquee .chipButton:hover {
+  background: #08765a;
+  color: #fff;
+  border-color: #08765a;
+  transform: translateY(-1px);
+}
+@keyframes presetScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.mediaPanel .mediaBulkActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin: 0;
+  font-size: 11px;
+}
+.mediaPanel .mediaBulkActions .outline,
+.mediaPanel .mediaBulkActions .dangerButton {
+  padding: 4px 11px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+
+/* ---------- 2. 三列工作区：等高 + 大字号 + 弹性 ---------- */
+.mediaPanel > .mediaWorkGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 0.85fr 1.2fr;
+  gap: 12px;
+  overflow: hidden;
+  align-items: stretch;  /* 强制三列等高 */
+}
+.mediaPanel > .mediaWorkGrid > section {
+  display: flex !important;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 16px;
+  gap: 12px;
+  height: 100%;  /* 强制填满 grid 单元 */
+}
+
+/* 三个 panel 标题统一 */
+.mediaPanel .mediaGeneratorCard .inlineTitle,
+.mediaPanel .mediaVideoCard .inlineTitle,
+.mediaPanel .mediaResultCard .inlineTitle {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+.mediaPanel .mediaGeneratorCard .inlineTitle h2,
+.mediaPanel .mediaVideoCard .inlineTitle h2,
+.mediaPanel .mediaResultCard .inlineTitle h2 {
+  font-size: 14px;
+  margin: 0;
+  font-weight: 700;
+}
+
+/* 内容区：弹性占满剩余高度，不滚动 */
+.mediaPanel .mediaGeneratorBody,
+.mediaPanel .mediaVideoBody,
+.mediaPanel .mediaResultBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- 3. 文生图：横向 tab 滚动布局 ---------- */
+.mediaPanel .mediaGeneratorTitle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mediaPanel .generateImageButton {
+  min-width: 110px;
+  min-height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 18px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* 横向 tab 容器：分两屏滚动 */
+.mediaPanel .mediaGeneratorBody .mediaGeneratorScroller {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.mediaPanel .mediaGeneratorBody .mediaGeneratorScroller .scrollerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 2x2 控件 */
+.mediaPanel .mediaGeneratorBody .formGrid.twoCols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.mediaPanel .mediaGeneratorBody .formGrid.twoCols label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 700;
+  min-width: 0;
+}
+.mediaPanel .mediaGeneratorBody .formGrid.twoCols input,
+.mediaPanel .mediaGeneratorBody .formGrid.twoCols select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  line-height: 1.4;
+}
+
+/* 模式切换 + 优化复选：单行 */
+.mediaPanel .mediaGeneratorBody .toggleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.mediaPanel .mediaGeneratorBody .toggleRow button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: #fff;
+  color: #245143;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.mediaPanel .mediaGeneratorBody .toggleRow button.active {
+  background: #08765a;
+  color: #fff;
+  border-color: #08765a;
+}
+.mediaPanel .mediaGeneratorBody .toggleRow label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+/* 优化模型下拉：单行 */
+.mediaPanel .mediaGeneratorBody .optimizerRow {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 700;
+}
+.mediaPanel .mediaGeneratorBody .optimizerRow select {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  line-height: 1.4;
+}
+
+/* 结构化提示词：紧凑 7 字段，2 列 grid，弹性占满 */
+.mediaPanel .mediaGeneratorBody .formGrid.span7 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  align-content: start;
+}
+.mediaPanel .mediaGeneratorBody .formGrid.span7 label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 700;
+  min-width: 0;
+}
+.mediaPanel .mediaGeneratorBody .formGrid.span7 input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  line-height: 1.4;
+}
+.mediaPanel .mediaGeneratorBody .formGrid.span7 .span2 {
+  grid-column: 1 / -1;
+}
+
+/* 自定义提示词 textarea：弹性占满 */
+.mediaPanel .mediaGeneratorBody .customPromptLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 700;
+}
+.mediaPanel .mediaGeneratorBody .customPromptLabel textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.mediaPanel .mediaGeneratorBody .rowActions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted, #6d7973);
+  flex: 0 0 auto;
+}
+.mediaPanel .mediaGeneratorBody .rowActions .outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #08765a;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.mediaPanel .mediaGeneratorBody .rowActions .muted {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 优化提示词按钮：主品牌色 + 图标 + 加大 */
+.mediaPanel .mediaGeneratorBody .optimizePromptButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(8, 118, 90, 0.2);
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.mediaPanel .mediaGeneratorBody .optimizePromptButton:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0a8a6a, #075f49);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(8, 118, 90, 0.28);
+}
+.mediaPanel .mediaGeneratorBody .optimizePromptButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+.mediaPanel .mediaGeneratorBody .optimizePromptButton:disabled {
+  background: #9bb6ad;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.mediaPanel .mediaGeneratorBody .softPanel {
+  padding: 8px 10px;
+  font-size: 12px;
+  border: 1px solid #d7e8df;
+  border-radius: 7px;
+  background: #f4faf7;
+  color: #213c34;
+  flex: 0 0 auto;
+  line-height: 1.5;
+}
+.mediaPanel .mediaGeneratorBody .softPanel b {
+  display: block;
+  margin-bottom: 3px;
+  color: #075f49;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mediaPanel .mediaGeneratorBody .softPanel pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- 4. 视频需求：textarea 弹性占满 ---------- */
+.mediaPanel .mediaVideoBody {
+  gap: 8px;
+}
+.mediaPanel .mediaVideoBody .videoHint {
+  margin: 0;
+  font-size: 12px;
+  color: #60766e;
+  line-height: 1.6;
+  flex: 0 0 auto;
+}
+.mediaPanel .mediaVideoBody label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #24453a;
+  font-weight: 700;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.mediaPanel .mediaVideoBody textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* ---------- 5. 生成结果：图片网格 ---------- */
+.mediaPanel .mediaResultBody {
+  gap: 10px;
+}
+.mediaPanel .compactEmptyState {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 13px;
+  color: #60766e;
+  padding: 16px;
+  border: 1px dashed #d7e8df;
+  border-radius: 8px;
+  background: #fbfdfb;
+  min-height: 0;
+  line-height: 1.6;
+}
+.mediaPanel .imageResultGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 10px;
+  overflow-y: auto;  /* 有图片时允许纵向滚动 */
+  align-content: start;
+}
+.mediaPanel .imageResultItem {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid #dce9e2;
+  border-radius: 8px;
+  background: #fff;
+}
+.mediaPanel .imageResultItem img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #eef7f3;
+}
+.mediaPanel .imageResultItem .rowCheck {
+  font-size: 10px;
+  gap: 4px;
+}
+.mediaPanel .imageResultItem .rowCheck b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+.mediaPanel .imageResultItem p {
+  margin: 0;
+  font-size: 10px;
+  color: #213c34;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+.mediaPanel .imageResultItem small {
+  font-size: 9px;
+  color: #6d7973;
+}
+.mediaPanel .imageResultItem .rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mediaPanel .imageResultItem .rowActions .outline,
+.mediaPanel .imageResultItem .rowActions .dangerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  font-size: 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #08765a;
+  text-decoration: none;
+  cursor: pointer;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  font-weight: 600;
+}
+.mediaPanel .imageResultItem .rowActions .dangerButton {
+  color: #ad3b3b;
+  border-color: #efd0d0;
+  background: #fff4f4;
+}
+
+/* ---------- 6. 响应式 ---------- */
+@media (max-width: 1280px) {
+  .mediaPanel > .mediaWorkGrid {
+    grid-template-columns: 1fr 0.7fr 1fr;
+    gap: 10px;
+  }
+  .mediaPanel .imageResultGrid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+  .mediaPanel .mediaModelForm {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .mediaPanel .mediaModelForm .mediaFormActions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 980px) {
+  .mediaPanel {
+    height: auto;
+    overflow: visible;
+  }
+  .mediaPanel > .mediaWorkGrid {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .mediaPanel > .mediaWorkGrid > section {
+    max-height: 480px;
+  }
+  .mediaPanel .mediaModelForm {
+    grid-template-columns: 1fr 1fr;
+  }
+}

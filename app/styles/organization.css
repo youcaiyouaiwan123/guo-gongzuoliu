@@ -1,0 +1,409 @@
+/* ====================== 企业架构页（OrganizationPanel）紧凑 Tab 布局 ====================== */
+
+/* 顶层：flex 列布局，自带滚动边界，禁止页面级滚动条 */
+.orgPage {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 18px;
+  gap: 12px;
+}
+
+/* 顶部：3 统计 + 操作按钮（单行紧凑） */
+.orgHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.orgHeader .metricRow.compact {
+  flex: 1 1 auto;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.orgHeaderActions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.orgHeaderActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.orgHeaderActions button:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: #f2faf6;
+  transform: translateY(-1px);
+}
+.orgHeaderActions button.primary {
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  border-color: transparent;
+}
+.orgHeaderActions button.primary:hover {
+  background: linear-gradient(135deg, #0a8a6a, #075f49);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(15, 105, 78, 0.2);
+}
+
+/* Tab 切换 */
+.orgTabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.orgTabs button {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a5d56;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.orgTabs button:hover {
+  color: var(--green);
+}
+.orgTabs button.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+.orgTabs .tabBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #edf5f1;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Tab 内容（可滚动） */
+.orgContent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 4px;
+}
+
+/* ====== 组织管理：2 列布局（部门 + 侧栏） ====== */
+.orgLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.5fr);
+  gap: 14px;
+  align-items: start;
+  margin: 0;
+}
+.orgTree,
+.orgSide {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.orgTree {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.orgTree .subTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 12px;
+}
+.orgTree .subTitle h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+.orgTree .subTitle span {
+  font-size: 10px;
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* 部门卡片网格：紧凑 2 列，允许内部独立滚动 */
+.departmentCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+/* 部门卡片：紧凑 */
+.departmentCard {
+  padding: 12px !important;
+  gap: 10px !important;
+  border-radius: 10px !important;
+}
+.departmentCard .orgNodeIcon {
+  width: 36px !important;
+  height: 36px !important;
+  font-size: 10px !important;
+}
+.departmentCardBody b {
+  font-size: 12px !important;
+  margin: 3px 0 !important;
+}
+.departmentCardBody small {
+  font-size: 8px !important;
+}
+.departmentCardBody em {
+  font-size: 8px !important;
+}
+
+/* 侧栏：紧凑、可滚动 */
+.orgSide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100dvh - 280px);
+  overflow-y: auto;
+}
+.departmentHead {
+  gap: 10px !important;
+}
+.departmentHead small {
+  font-size: 8px !important;
+}
+.departmentHead h3 {
+  font-size: 14px !important;
+  margin: 2px 0 4px !important;
+}
+.departmentHead p {
+  font-size: 8px !important;
+}
+.departmentHead button,
+.departmentMemberActions button {
+  padding: 5px 8px !important;
+  font-size: 8px !important;
+}
+.memberSearch {
+  margin: 0 !important;
+  padding: 8px 10px !important;
+  font-size: 11px;
+}
+.departmentMembers {
+  max-height: 260px !important;
+  gap: 6px !important;
+}
+.departmentMembers > article {
+  padding: 9px 10px !important;
+}
+.departmentMembers b {
+  font-size: 10px !important;
+}
+.departmentMembers span {
+  font-size: 8px !important;
+}
+
+/* 侧栏标题 */
+.orgSide > h3 {
+  margin: 0 0 6px !important;
+  font-size: 12px !important;
+  color: var(--ink);
+}
+.orgSideDivider {
+  margin: 8px 0 !important;
+  background: var(--line) !important;
+}
+.myOrgCard,
+.emptyMini {
+  margin-bottom: 0 !important;
+  padding: 12px !important;
+}
+.myOrgCard b {
+  font-size: 13px !important;
+}
+.transferItem {
+  padding: 9px !important;
+  margin-bottom: 6px !important;
+}
+.transferItem b {
+  font-size: 9px !important;
+}
+.transferItem span,
+.transferItem small {
+  font-size: 8px !important;
+}
+.transferItem button {
+  padding: 5px 8px !important;
+  font-size: 8px !important;
+}
+
+/* ====== 架构图 Tab ====== */
+.orgChartSection {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.orgChartSection .subTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 12px;
+  flex: 0 0 auto;
+}
+.orgChartSection .subTitle h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+.orgChartViewport {
+  margin-top: 0 !important;
+  padding: 12px 16px 20px !important;
+  max-height: calc(100dvh - 360px);
+}
+
+/* ====== 汇报记录 Tab ====== */
+.orgReportsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.orgReportsSection .subTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+.orgReportsSection .subTitle h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+.orgReportsSection .subTitle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.orgReportsSection .subTitle button:hover {
+  background: linear-gradient(135deg, #0a8a6a, #075f49);
+  transform: translateY(-1px);
+}
+.reportGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+.reportGrid > article {
+  min-height: 0 !important;
+  padding: 14px !important;
+}
+.reportGrid h3 {
+  margin: 10px 0 6px !important;
+  font-size: 13px !important;
+}
+.reportGrid p {
+  font-size: 10px !important;
+  line-height: 1.6 !important;
+}
+.reportGrid small {
+  font-size: 8px !important;
+  margin-top: 10px !important;
+}
+
+/* 滚动条样式 */
+.orgContent::-webkit-scrollbar,
+.orgSide::-webkit-scrollbar,
+.orgChartViewport::-webkit-scrollbar,
+.departmentMembers::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.orgContent::-webkit-scrollbar-thumb,
+.orgSide::-webkit-scrollbar-thumb,
+.orgChartViewport::-webkit-scrollbar-thumb,
+.departmentMembers::-webkit-scrollbar-thumb {
+  background: #c5d4cc;
+  border-radius: 3px;
+}
+.orgContent::-webkit-scrollbar-thumb:hover,
+.orgSide::-webkit-scrollbar-thumb:hover,
+.orgChartViewport::-webkit-scrollbar-thumb:hover,
+.departmentMembers::-webkit-scrollbar-thumb:hover {
+  background: #87a89a;
+}
+
+/* 响应式 */
+@media (max-width: 1100px) {
+  .orgLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .orgSide {
+    max-height: none;
+  }
+  .departmentCardGrid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .orgPage {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+  .orgHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .orgHeaderActions {
+    justify-content: flex-start;
+  }
+  .departmentCardGrid {
+    grid-template-columns: 1fr;
+  }
+  .reportGrid {
+    grid-template-columns: 1fr;
+  }
+}

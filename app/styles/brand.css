@@ -1,0 +1,82 @@
+/* 海芯博创全局品牌 */
+.loginPage {
+  position: relative;
+  padding-bottom: 48px;
+}
+.loginLogo {
+  width: 190px;
+  height: 118px;
+  box-sizing: border-box;
+  padding: 10px;
+  object-fit: contain;
+  object-position: center;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px #00000028;
+}
+.brandLogo {
+  width: 68px;
+  height: 52px;
+  box-sizing: border-box;
+  padding: 5px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #dce7e1;
+  border-radius: 10px;
+}
+.siteFooter {
+  grid-column: 2;
+  align-self: end;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+  color: #75847d;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.loginFooter {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-color: #ffffff1c;
+  background: #0c1d17;
+  color: #9fb1aa;
+}
+@media (max-width: 900px) {
+  .loginPage {
+    grid-template-columns: 1fr;
+    padding: 28px 24px 72px;
+  }
+  .loginBrand {
+    display: none;
+  }
+  .loginCard {
+    width: min(430px, 100%);
+    padding: clamp(28px, 4vw, 32px);
+  }
+  .brandLogo {
+    width: 58px;
+    height: 48px;
+  }
+  .siteFooter {
+    grid-column: 1;
+  }
+}
+@media (max-width: 620px) {
+  .brandLogo {
+    width: 54px;
+    height: 44px;
+  }
+  .siteFooter {
+    grid-column: 1;
+    padding: 14px 16px;
+  }
+  .loginLogo {
+    width: 170px;
+    height: 106px;
+  }
+}
+

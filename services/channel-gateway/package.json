@@ -1,0 +1,14 @@
+{
+  "name": "haixin-channel-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.71.1",
+    "@wecom/aibot-node-sdk": "^1.0.4",
+    "dingtalk-stream": "^2.1.4"
+  }
+}

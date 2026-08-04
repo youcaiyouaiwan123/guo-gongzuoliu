@@ -1,0 +1,1087 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #19231f;
+  --muted: #6d7973;
+  --line: #dde5e0;
+  --paper: #f5f7f3;
+  --white: #fff;
+  --green: #0b6b4f;
+  --green-dark: #07553f;
+  --green-soft: #e6f3ed;
+  --amber: #a36516;
+  --red: #ad3b3b;
+}
+
+.notice {
+  position: fixed;
+  right: 24px;
+  top: 20px;
+  z-index: 20;
+  background: #173f34;
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 10px 30px #173f3430;
+}
+.emptyState {
+  grid-column: 1/-1;
+  padding: 42px;
+  text-align: center;
+  border: 1px dashed #c9d5cf;
+  border-radius: 16px;
+  color: #60716a;
+  background: #fafcfb;
+}
+.emptyState b {
+  display: block;
+  color: #243c33;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0f231c99;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.modal {
+  width: min(620px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: 0 30px 80px #07181055;
+  display: grid;
+  gap: 17px;
+}
+.modalHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.modalHead h2 {
+  margin: 0 0 6px;
+}
+.modalHead p {
+  margin: 0;
+  color: #718078;
+}
+.modalHead > button {
+  border: 0;
+  background: #eef3f0;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+}
+.modal label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #3d5149;
+}
+.modal input,
+.modal select,
+.modal textarea {
+  font: inherit;
+  font-weight: 400;
+  border: 1px solid #d3ded8;
+  border-radius: 10px;
+  padding: 11px 12px;
+  resize: vertical;
+}
+.modal input:focus,
+.modal textarea:focus,
+.modal select:focus {
+  outline: 2px solid #bde2d1;
+  border-color: #438a6c;
+}
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.modalActions button {
+  border: 0;
+  border-radius: 10px;
+  padding: 11px 18px;
+  background: #1d684d;
+  color: #fff;
+  font-weight: 700;
+}
+.modalActions .outline {
+  background: #eef3f0;
+  color: #40544b;
+}
+.knowledgeViewer {
+  width: min(920px, calc(100vw - 30px));
+}
+.knowledgeViewer pre {
+  max-height: 62vh;
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f6f9f7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font:
+    13px/1.7 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  color: var(--ink);
+}
+.composer button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.warningBadge {
+  padding: 8px 12px;
+  color: #9a6010;
+  background: #fff3dc;
+  border-radius: 18px;
+  font-size: 11px;
+}
+.modelSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.modelSummary article {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfb;
+}
+.modelSummary span,
+.modelSummary b,
+.modelSummary small {
+  display: block;
+}
+.modelSummary span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.modelSummary b {
+  margin: 8px 0;
+  font-size: 14px;
+}
+.modelSummary small {
+  font-size: 9px;
+  color: #89958f;
+  overflow-wrap: anywhere;
+}
+.providerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.providerGrid article {
+  display: flex;
+  position: relative;
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+.providerGrid .providerLinkCard {
+  grid-column: 1/-1;
+  display: flex;
+  position: relative;
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: inherit;
+  text-decoration: none;
+  background: #fbfcfb;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+.providerGrid .providerLinkCard:hover {
+  border-color: var(--green);
+  box-shadow: 0 10px 28px rgba(16, 92, 70, 0.1);
+  transform: translateY(-1px);
+}
+.providerGrid h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.providerGrid p,
+.providerGrid small {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.providerGrid small {
+  margin-top: 4px;
+}
+.providerGrid em {
+  position: absolute;
+  right: 13px;
+  top: 13px;
+  color: var(--green);
+  font-size: 9px;
+  font-style: normal;
+  background: var(--green-soft);
+  padding: 4px 7px;
+  border-radius: 10px;
+}
+.providerMark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: white;
+  background: var(--green);
+  font-weight: 700;
+}
+.moduleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.moduleGrid article {
+  position: relative;
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.moduleGrid h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.moduleGrid p {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.moduleGrid small {
+  display: block;
+  color: #89958f;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+.moduleGrid em {
+  align-self: start;
+  color: var(--green);
+  background: var(--green-soft);
+  padding: 5px 8px;
+  border-radius: 12px;
+  font-size: 9px;
+  font-style: normal;
+}
+.moduleGrid button {
+  grid-column: 2/-1;
+  width: max-content;
+  border: 0;
+  background: var(--green);
+  color: #fff;
+  padding: 7px 11px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+.moduleIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 800;
+}
+.workflowGrid {
+  display: grid;
+  gap: 14px;
+}
+.workflowCard {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.workflowCardTop,
+.workflowActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.workflowCardTop h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+.workflowCardTop p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.workflowCardTop em,
+.runState {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 14px;
+  padding: 5px 9px;
+}
+.workflowPath,
+.runPreview {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 18px 0;
+}
+.workflowPath span,
+.runPreview span {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid #d7e2dc;
+  border-radius: 9px;
+  background: #f9fbfa;
+  font-size: 10px;
+}
+.workflowPath b,
+.runPreview b {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--green);
+  color: white;
+  font-size: 9px;
+}
+.workflowPath i,
+.runPreview i {
+  margin-left: 8px;
+  color: #7f9188;
+  font-style: normal;
+  font-size: 16px;
+}
+.workflowActions small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.workflowActions > div {
+  display: flex;
+  gap: 7px;
+}
+.workflowActions button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  padding: 9px 14px;
+  font-size: 10px;
+}
+.subTitle {
+  margin-top: 28px;
+}
+.runList {
+  display: grid;
+  gap: 8px;
+}
+.runList > button {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+}
+.runList b {
+  font-size: 11px;
+}
+.runList small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.runList i {
+  color: var(--green);
+  font-size: 9px;
+  font-style: normal;
+}
+.templatePicker {
+  padding: 13px;
+  border-radius: 10px;
+  background: #f3f7f4;
+}
+.templatePicker > b {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 12px;
+}
+.templatePicker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.templatePicker button,
+.addNode {
+  border: 1px solid #cbdcd3;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--green);
+  padding: 8px 10px;
+  font-size: 10px;
+}
+.builder {
+  display: grid;
+  gap: 8px;
+}
+.builderHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+}
+.builderHead > div {
+  display: grid;
+  gap: 3px;
+}
+.builderHead small {
+  color: var(--muted);
+}
+.builderLegend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #775b12;
+  font-size: 9px;
+}
+.builderLegend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: #f0b94d;
+}
+.builderNode {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 120px 1fr 28px;
+  gap: 7px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.builderNode > b {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  font-size: 10px;
+}
+.builderNode select,
+.builderNode input {
+  width: 100%;
+  margin: 0;
+  padding: 8px;
+  font-size: 10px;
+}
+.builderNode .wide {
+  grid-column: 2/4;
+}
+.builderNode > button {
+  border: 0;
+  background: #f5e7e7;
+  color: var(--red);
+  border-radius: 7px;
+  height: 28px;
+}
+.builderNode > i {
+  position: absolute;
+  left: 20px;
+  bottom: -15px;
+  z-index: 2;
+  color: var(--green);
+  font-style: normal;
+}
+.builderNode.parallelNode {
+  margin-left: 18px;
+  border-color: #e3c274;
+  background: #fffaf0;
+}
+.builderNode.parallelNode > b {
+  background: #b47c12;
+}
+.builderNode.parallelNode > i {
+  color: #b47c12;
+}
+.builderNode .addBranchButton {
+  grid-column: 2/4;
+  height: auto;
+  background: #fff1cb;
+  color: #805b11;
+  padding: 7px;
+}
+.builderAddActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.addNode {
+  width: 100%;
+  background: var(--green-soft);
+  padding: 10px;
+}
+.parallelAdd {
+  border-color: #e3c274;
+  background: #fff5db;
+  color: #805b11;
+}
+.parallelHint {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f7f8f7;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+.parallelPathNode {
+  border-color: #e3c274 !important;
+  background: #fff8e8 !important;
+}
+.parallelPathNode > b {
+  background: #b47c12 !important;
+}
+.runModal,
+.runDetail {
+  width: min(760px, 100%);
+}
+.runSummary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 11px;
+}
+.runSummary.statusFailed {
+  background: #fbeaea;
+  color: var(--red);
+}
+.runSummary.statusPendingApproval {
+  background: #fff3dc;
+  color: var(--amber);
+}
+.stepTimeline {
+  display: grid;
+  gap: 8px;
+}
+.stepTimeline article {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.stepTimeline article > span {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 800;
+}
+.stepTimeline b,
+.stepTimeline small {
+  display: block;
+}
+.stepTimeline b {
+  font-size: 11px;
+}
+.stepTimeline small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.stepTimeline details {
+  margin-top: 8px;
+}
+.stepTimeline summary {
+  color: var(--green);
+  font-size: 9px;
+  cursor: pointer;
+}
+.stepTimeline pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: #f5f7f6;
+  border-radius: 8px;
+  padding: 10px;
+  font: 10px/1.6 monospace;
+}
+.stepError {
+  color: var(--red);
+  font-size: 10px;
+}
+.inputBuilderNode {
+  background: #f7fbf9;
+}
+.workflowInputSource {
+  grid-column: 2/4;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #cfe0d7;
+  border-radius: 9px;
+  background: #fff;
+}
+.inputModeTabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.inputModeTabs button {
+  height: auto !important;
+  padding: 8px !important;
+  border: 1px solid var(--line) !important;
+  background: #f5f7f6 !important;
+  color: #50635a !important;
+}
+.inputModeTabs button.active {
+  border-color: var(--green) !important;
+  background: var(--green-soft) !important;
+  color: var(--green) !important;
+}
+.promptStructureGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.promptStructureGrid label,
+.workflowResourceSelect {
+  margin: 0;
+  font-size: 9px;
+  color: #4d6157;
+}
+.promptStructureGrid input,
+.workflowResourceSelect select,
+.workflowDirectRequest textarea {
+  margin-top: 4px !important;
+}
+.workflowDirectRequest textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.workflowResourceSelect small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 8px;
+}
+@media (max-width: 620px) {
+  .modelSummary,
+  .providerGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+/* 全局锁定视口：页面本身不产生滚动条，纵向滚动一律由内容容器
+   （.workspaceBody、.sidebar、.loginCard 等）在自身内部承担。
+   100dvh 优于 100vh：可以正确处理移动浏览器地址栏伸缩，
+   并在桌面端保持和 100vh 同样的铺满效果。 */
+html,
+body {
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  color: var(--ink);
+  background: var(--paper);
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+.loginPage {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  background: #10241d;
+}
+.loginBrand {
+  padding: 9vh 9vw;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  overflow-y: auto;
+}
+.loginBrand > p {
+  margin: 20px 0 35px;
+  color: #a9bdb5;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+.loginBrand h1 {
+  max-width: 650px;
+  margin: 0;
+  font-family: Georgia,\"Songti SC\",serif;
+  font-size: 40px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+.loginBrand ul {
+  display: flex;
+  gap: 26px;
+  margin: 46px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #9ed0ba;
+  font-size: 12px;
+}
+.loginCard {
+  align-self: center;
+  width: min(430px, calc(100% - 48px));
+  margin: auto;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 22px;
+  padding: 40px;
+  box-shadow: 0 30px 90px #07140f66;
+}
+.loginCard h2 {
+  margin: 9px 0 10px;
+  font-family: Georgia,\"Songti SC\",serif;
+  font-size: 30px;
+}
+.loginCard > p {
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.loginCard label {
+  display: grid;
+  gap: 8px;
+  color: #40544b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.loginCard input {
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: none;
+}
+.loginCard input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+.authUnifiedCard {
+  display: grid;
+  gap: 18px;
+}
+.authUnifiedCard > p {
+  margin-bottom: 0;
+}
+.authRoleSwitch,
+.authTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f6faf8;
+}
+.authTabs {
+  margin-top: -4px;
+}
+.authRoleSwitch button,
+.authTabs button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #52675d;
+  font-size: 13px;
+  font-weight: 800;
+}
+.authRoleSwitch button.active,
+.authTabs button.active {
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 8px 22px #0b76501c;
+}
+.authRegisterGrid {
+  display: grid;
+  gap: 14px;
+}
+.noticeLine {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #cfe6da;
+  border-radius: 12px;
+  background: #f1faf5;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+.loginCard > small {
+  display: block;
+  text-align: center;
+  color: #89958f;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.signout {
+  color: #9ed0ba;
+  text-decoration: none;
+  font-size: 10px;
+}
+
+.shell {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
+}
+.shell > * {
+  min-width: 0;
+  min-height: 0;
+}
+.sidebar {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 18px 20px;
+  background: #10241d;
+  color: #f7fbf9;
+  display: flex;
+  flex-direction: column;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px 26px;
+  border-bottom: 1px solid #294038;
+}
+.brand b,
+.brand small,
+.profile b,
+.profile small {
+  display: block;
+}
+.brand b {
+  letter-spacing: 0.06em;
+  font-size: 16px;
+}
+.brand small,
+.profile small {
+  color: #96aaa2;
+  font-size: 11px;
+  margin-top: 3px;
+}
+nav {
+  display: grid;
+  gap: 6px;
+  margin-top: 24px;
+}
+nav button {
+  border: 0;
+  color: #aebdb7;
+  background: transparent;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: 9px;
+}
+nav button i {
+  display: inline-block;
+  width: 25px;
+  font-style: normal;
+}
+nav button:hover,
+nav button.active {
+  color: white;
+  background: #244438;
+}
+.securityNote {
+  margin-top: auto;
+  padding: 14px;
+  border: 1px solid #315348;
+  border-radius: 10px;
+  background: #17352b;
+}
+.securityNote span {
+  font-size: 12px;
+  color: #8fd3b6;
+}
+.securityNote p {
+  margin: 7px 0 0;
+  color: #9cb0a8;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.profile {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-top: 17px;
+  padding: 13px 7px 0;
+  border-top: 1px solid #294038;
+}
+.avatar {
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  background: #d7ad66;
+  color: #173027;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.profile > span:nth-child(2) {
+  flex: 1;
+}
+.profile b {
+  font-size: 13px;
+}
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+header {
+  flex: 0 0 auto;
+  height: 103px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 38px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.76);
+}
+/* 唯一的纵向滚动容器：header 固定，正文在剩余高度内滚动，页面级滚动条因此消失。
+   内部默认按内容流排版；启用 .chatBody 后切换为 flex 列布局，
+   让 .chatLayout 这种 100% 高的子组件能正确铺满剩余空间。 */
+.workspaceBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.workspaceBody.chatBody {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.workspaceBody.chatBody .chatLayout {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.eyebrow {
+  color: var(--green);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+}
+h1 {
+  font-family: Georgia, "Songti SC", serif;
+  margin: 4px 0 0;
+  font-size: 27px;
+  font-weight: 600;
+}
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.headerActions label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.headerActions label strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 12px;
+}
+select {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 32px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: white;
+}
+.status {
+  border: 1px solid #cfe1d7;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--green);
+  background: white;
+}
+.status i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #35a979;
+  margin-right: 6px;
+  box-shadow: 0 0 0 3px #d8f3e7;
+}
+

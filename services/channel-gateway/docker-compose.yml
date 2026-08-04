@@ -1,0 +1,9 @@
+services:
+  haixin-channel-gateway:
+    build: .
+    restart: unless-stopped
+    environment:
+      HAIXIN_ACCOUNTS_JSON: ${HAIXIN_ACCOUNTS_JSON}
+      PORT: ${PORT:-8788}
+    ports:
+      - "${PORT:-8788}:${PORT:-8788}"

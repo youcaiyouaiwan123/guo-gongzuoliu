@@ -1,0 +1,8 @@
+{
+  "name": "haixin-feishu-long-connection",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node index.mjs" },
+  "dependencies": { "@larksuiteoapi/node-sdk": "^1.71.1" }
+}

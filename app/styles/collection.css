@@ -1,0 +1,875 @@
+/* ====================== 数据采集页（CollectionPanel）紧凑双 Tab 布局 ====================== */
+
+/* 顶层：flex 列布局，自带滚动边界 */
+.collectionLayout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 18px;
+  gap: 12px;
+}
+
+/* 顶部：3 统计 + 4 模式（单行紧凑） */
+.collectionHeader {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* metric 紧凑 */
+.metricRow.compact {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.metricRow.compact article {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+.metricRow.compact article span {
+  font-size: 10px;
+  color: #60766e;
+  font-weight: 600;
+}
+.metricRow.compact article b {
+  font-size: 18px;
+  color: #08765a;
+  font-weight: 700;
+  font-family: Georgia, serif;
+}
+.metricRow.compact article small {
+  font-size: 9px;
+  color: #8b9791;
+}
+
+/* 4 模式按钮（紧凑单行） */
+.crawlerModes.compact {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.crawlerModes.compact button {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #f0f7f3, #fff);
+  border: 1px solid #cfe1d7;
+  border-radius: 8px;
+  color: #08765a;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  min-width: 0;
+}
+.crawlerModes.compact button:hover {
+  background: linear-gradient(135deg, #08765a, #0a8a6a);
+  color: #fff;
+  transform: translateY(-1px);
+  border-color: #08765a;
+}
+
+/* 工具栏：流程 + 新建按钮 */
+.collectionToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+.collectionFlow.compact {
+  font-size: 10px;
+  color: #60766e;
+  letter-spacing: 0.3px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collectionFlow.compact span {
+  display: inline-block;
+  margin-right: 6px;
+  color: #08765a;
+  font-weight: 600;
+}
+.collectionFlow.compact i {
+  font-style: normal;
+  margin: 0 6px;
+  color: #8ba096;
+}
+.collectionToolbar .primaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  transition: all 0.15s;
+}
+.collectionToolbar .primaryButton:hover {
+  background: linear-gradient(135deg, #0a8a6a, #075f49);
+  transform: translateY(-1px);
+}
+
+/* Tab 切换 */
+.collectionTabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.collectionTabs button {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4a5d56;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: -1px;
+}
+.collectionTabs button:hover {
+  color: #08765a;
+}
+.collectionTabs button.active {
+  color: #08765a;
+  border-bottom-color: #08765a;
+}
+
+/* Tab 内容（可滚动） */
+.collectionContent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+/* 批量操作条 */
+.bulkActionBar.compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: #f4f7f5;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.bulkActionBar.compact label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #4a5d56;
+  cursor: pointer;
+}
+.bulkActionBar.compact .dangerButton {
+  padding: 4px 10px;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+/* 源卡片网格 */
+.sourceGrid.compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+.sourceCard {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.15s;
+}
+.sourceCard:hover {
+  border-color: #cfe1d7;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+.sourceCard .cardTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sourceCard .moduleIcon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #e8f5ee, #f6fbf8);
+  color: #08765a;
+  border-radius: 8px;
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.sourceCard .cardTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sourceCard .cardTitle h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a3a2d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sourceCard .cardTitle small {
+  font-size: 10px;
+  color: #60766e;
+  display: block;
+  margin-top: 1px;
+}
+.sourceCard .collectionState {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e6f4ee;
+  color: #08765a;
+  font-weight: 600;
+}
+.sourceCard .sourceUrl {
+  font-size: 11px;
+  color: #4a5d56;
+  background: #f4f7f5;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  margin: 0;
+}
+.sourceCard .sourceMeta.compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10px;
+  color: #60766e;
+}
+.sourceCard .sourceMeta.compact span {
+  display: inline-block;
+}
+.sourceCard .cardActions.compact {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f4f1;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.sourceCard .cardActions.compact button {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: #08765a;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.sourceCard .cardActions.compact button:hover {
+  background: #08765a;
+  color: #fff;
+  border-color: #08765a;
+}
+.sourceCard .cardActions.compact button.outline {
+  color: #4a5d56;
+  border-color: #d3dcd8;
+  background: #fff;
+}
+.sourceCard .cardActions.compact button.outline:hover {
+  background: #4a5d56;
+  color: #fff;
+  border-color: #4a5d56;
+}
+.sourceCard .cardActions.compact button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sourceCard .cardActions.compact .itemSelect {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #60766e;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.sourceCard .cardActions.compact .itemSelect input {
+  margin: 0;
+}
+.sourceCard .cardActions.compact .dangerButton {
+  margin-left: 0;
+  background: #fff;
+  color: var(--red);
+  border-color: #f0d7d7;
+}
+.sourceCard .cardActions.compact .dangerButton:hover {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+.sourceCard .cardMenuWrap {
+  margin-left: auto;
+  position: relative;
+  font-size: 11px;
+  color: #60766e;
+  cursor: pointer;
+}
+.sourceCard .cardMenuWrap .menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  display: none;
+  z-index: 10;
+  min-width: 140px;
+}
+.sourceCard .cardMenuWrap:hover .menu {
+  display: flex;
+  flex-direction: column;
+}
+.sourceCard .cardMenuWrap .menu button,
+.sourceCard .cardMenuWrap .menu label {
+  padding: 6px 10px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  color: #24453a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.sourceCard .cardMenuWrap .menu button:hover,
+.sourceCard .cardMenuWrap .menu label:hover {
+  background: #f0f7f3;
+  color: #08765a;
+}
+.sourceCard .cardMenuWrap .menu .itemSelect {
+  margin-left: 0;
+}
+.sourceCard .cardMenuWrap .menu .dangerButton {
+  background: transparent;
+  color: var(--red);
+  border: 0;
+  margin-left: 0;
+}
+.sourceCard .cardMenuWrap .menu .dangerButton:hover {
+  background: #fbe9e9;
+  color: var(--red);
+}
+
+.sourceEmpty {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  color: #60766e;
+  font-size: 13px;
+}
+
+/* 清洗 tab 内容 */
+.cleaningGrid.compact {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.cleaningGrid.compact button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+.cleaningGrid.compact button:hover {
+  border-color: #cfe1d7;
+}
+.cleaningGrid.compact button.active {
+  background: linear-gradient(135deg, #f0f7f3, #fff);
+  border-color: #08765a;
+}
+.cleaningGrid.compact button > span {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f4f1;
+  border-radius: 5px;
+  font-size: 14px;
+  color: #08765a;
+  flex: 0 0 auto;
+}
+.cleaningGrid.compact button.active > span {
+  background: #08765a;
+  color: #fff;
+}
+.cleaningGrid.compact button b {
+  font-size: 12px;
+  color: #1a3a2d;
+  font-weight: 600;
+  display: block;
+}
+.cleaningGrid.compact button small {
+  font-size: 10px;
+  color: #60766e;
+  display: block;
+  margin-top: 1px;
+}
+
+.cleaningEntrances.compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.cleaningEntrances.compact > article {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #f0f7f3, #fff);
+  border: 1px solid #cfe1d7;
+  border-radius: 8px;
+}
+.cleaningEntrances.compact .cleaningEntranceIcon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #08765a;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+.cleaningEntrances.compact article b {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a3a2d;
+  display: block;
+}
+.cleaningEntrances.compact article p {
+  margin: 0;
+  font-size: 10px;
+  color: #60766e;
+}
+.cleaningEntrances.compact article em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  color: #08765a;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cleaningEntrances.compact .localFileButton {
+  margin-left: auto;
+  position: relative;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  background: var(--green) !important;
+  color: #fff !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0 !important;
+}
+.cleaningEntrances.compact .localFileButton input {
+  position: absolute;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0;
+}
+
+.localCleaningWorkspace.compact {
+  background: #fff;
+  border: 1px solid #b9d2c6;
+  border-radius: 8px;
+  padding: 12px;
+  flex: 0 0 auto;
+}
+.localCleaningWorkspace.compact .localCleaningTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f0f4f1;
+  gap: 8px;
+}
+.localCleaningWorkspace.compact .localCleaningTitle b {
+  font-size: 12px;
+  color: #1a3a2d;
+  display: block;
+}
+.localCleaningWorkspace.compact .localCleaningTitle small {
+  font-size: 10px;
+  color: #60766e;
+  margin-left: 6px;
+}
+.localCleaningWorkspace.compact .localCleaningTitle > div:last-child {
+  display: flex;
+  gap: 6px;
+}
+.localCleaningWorkspace.compact .localCleaningTitle button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.localCleaningWorkspace.compact .localCleaningTitle button.outline {
+  background: #fff;
+  border: 1px solid var(--line) !important;
+  color: #4a5d56;
+}
+.localCleaningWorkspace.compact .localCleaningTitle button.outline:hover {
+  background: #4a5d56;
+  color: #fff;
+}
+.localCleaningWorkspace.compact .localCleaningTitle button:not(.outline) {
+  background: var(--green);
+  color: #fff;
+}
+.localCleaningWorkspace.compact .localCleaningTitle button:not(.outline):hover {
+  background: var(--green-dark);
+}
+.localCleaningWorkspace.compact .cleaningCompare {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.localCleaningWorkspace.compact .cleaningCompare.active {
+  grid-template-columns: 1fr 1fr;
+}
+.localCleaningWorkspace.compact .cleaningCompare label {
+  margin: 0;
+  display: block;
+}
+.localCleaningWorkspace.compact .cleaningCompare label > small {
+  display: block;
+  font-size: 10px;
+  color: #60766e;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.localCleaningWorkspace.compact textarea {
+  width: 100%;
+  font-family: monospace;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8faf9;
+  resize: vertical;
+  min-height: 140px;
+  max-height: 240px;
+}
+.localCleaningWorkspace.compact .localCleaningActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.localCleaningWorkspace.compact .localCleaningActions button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.localCleaningWorkspace.compact .localCleaningActions button.outline {
+  background: #fff;
+  border: 1px solid var(--line) !important;
+  color: #4a5d56;
+}
+.localCleaningWorkspace.compact .localCleaningActions button.outline:hover {
+  background: #4a5d56;
+  color: #fff;
+}
+.localCleaningWorkspace.compact .localCleaningActions button:not(.outline) {
+  background: var(--green);
+  color: #fff;
+}
+
+/* 运行记录 section 头 */
+.runHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  flex: 0 0 auto;
+  padding: 0 2px;
+}
+.runHeader b {
+  font-size: 12px;
+  color: #1a3a2d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+.runHeader button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--green);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.runHeader button:hover {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
+/* 采集运行记录（紧凑） */
+.collectionRunList.compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.collectionRunList.compact article {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.collectionRunList.compact article:hover {
+  background: #f0f7f3;
+  border-color: #cfe1d7;
+}
+.collectionRunList.compact .runState {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  flex: 0 0 auto;
+  background: #eef3f0;
+  color: #567066;
+}
+.collectionRunList.compact .runState.statusFailed,
+.collectionRunList.compact .runState.失败,
+.collectionRunList.compact .runState.采集失败 {
+  background: #f9eaea;
+  color: var(--red);
+}
+.collectionRunList.compact .runState.statusPendingReview,
+.collectionRunList.compact .runState.待确认,
+.collectionRunList.compact .runState.待审核,
+.collectionRunList.compact .runState.已采集 {
+  background: #fff2d9;
+  color: #8b651d;
+}
+.collectionRunList.compact b {
+  font-size: 12px;
+  color: #1a3a2d;
+  font-weight: 700;
+  flex: 0 0 auto;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collectionRunList.compact small {
+  font-size: 10px;
+  color: #60766e;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collectionRunList.compact i {
+  font-style: normal;
+  font-size: 10px;
+  color: #08765a;
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.collectionRunList.compact .itemSelect {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #60766e;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.collectionRunList.compact .itemSelect input {
+  margin: 0;
+}
+.collectionRunList.compact .dangerButton {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 10px;
+  background: #fff;
+  color: var(--red);
+  border: 1px solid #f0d7d7;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.collectionRunList.compact .dangerButton:hover {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+
+/* 响应式 */
+@media (max-width: 1100px) {
+  .collectionHeader {
+    grid-template-columns: 1fr;
+  }
+  .crawlerModes.compact {
+    flex-wrap: wrap;
+  }
+  .crawlerModes.compact button {
+    flex: 1 1 calc(50% - 4px);
+  }
+  .cleaningGrid.compact {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/* ====================== AI 智能采集对话框 ====================== */
+.aiCollectModal {
+  max-width: 640px;
+  width: 90vw;
+}
+.aiCollectModal textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.aiCollectModal textarea::placeholder {
+  color: #b0c0b8;
+  font-size: 12px;
+}
+.aiCollectModal input[type="text"] {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.aiCollectResult {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.aiCollectResultHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: #f0f7f4;
+  border-bottom: 1px solid var(--line);
+}
+.aiCollectResultHead b {
+  font-size: 12px;
+  color: #08765a;
+}
+.aiCollectResultHead small {
+  font-size: 10px;
+  color: #60766e;
+}
+.aiCollectResult pre {
+  margin: 0;
+  padding: 14px;
+  max-height: 400px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafcfb;
+}
+
+@media (max-width: 760px) {
+  .cleaningGrid.compact,
+  .cleaningEntrances.compact,
+  .localCleaningWorkspace.compact .cleaningCompare,
+  .localCleaningWorkspace.compact .cleaningCompare.active {
+    grid-template-columns: 1fr;
+  }
+  .crawlerModes.compact button {
+    flex: 1 1 100%;
+  }
+  .collectionFlow.compact {
+    display: none;
+  }
+}

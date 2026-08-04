@@ -1,0 +1,57 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.selfhost
+    restart: unless-stopped
+    environment:
+      PLATFORM_CREDENTIALS_KEY: ${PLATFORM_CREDENTIALS_KEY:?PLATFORM_CREDENTIALS_KEY is required}
+      HAIXIN_GATEWAY_ADMIN_SECRET: ${HAIXIN_GATEWAY_ADMIN_SECRET:?HAIXIN_GATEWAY_ADMIN_SECRET is required}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:?DEFAULT_ADMIN_USERNAME is required}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD is required}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://claudecc.top}
+      MODEL_NAME: ${MODEL_NAME:-gpt-5.5}
+      MODEL_RELAY_URL: http://model-relay:8789/v1/chat/completions
+      COLLECTOR_PROXY_URL: http://model-relay:8789/collector/fetch
+    volumes:
+      - haixin_app_data:/data
+    expose:
+      - "3000"
+    depends_on:
+      - model-relay
+
+  model-relay:
+    build:
+      context: ./services/model-relay
+    restart: unless-stopped
+    expose:
+      - "8789"
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx-ip.conf:/etc/nginx/conf.d/default.conf:ro
+      - /opt/haixin-ai/shared/deploy/users.htpasswd:/etc/nginx/auth/users:ro
+
+  channel-gateway:
+    build:
+      context: ./services/channel-gateway
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      HAIXIN_ACCOUNTS_JSON: ${HAIXIN_ACCOUNTS_JSON:-[]}
+      HAIXIN_GATEWAY_ACCOUNTS_URL: http://app:3000/api/gateway/accounts
+      HAIXIN_GATEWAY_ADMIN_SECRET: ${HAIXIN_GATEWAY_ADMIN_SECRET:?HAIXIN_GATEWAY_ADMIN_SECRET is required}
+      PORT: "8788"
+    expose:
+      - "8788"
+
+volumes:
+  haixin_app_data:
