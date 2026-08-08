@@ -5,6 +5,7 @@ import { callModel } from "../_modelProvider";
 import { decryptSecret } from "../_crypto";
 import { ensureColumn } from "../_schema";
 import { log, logQuery } from "../_logger";
+import { findDuplicateUnit, resolveUpwardRecipients, type OrgMemberRow, type OrgUnitRow } from "./_orgLogic";
 
 type RuntimeEnv = {
   DB: D1Database;
@@ -71,19 +72,24 @@ async function aiSummarize(email: string, title: string, content: string) {
   }
 }
 
+async function loadUnits() {
+  const result = await runtime.DB.prepare("SELECT id,name,unit_type AS unitType,parent_id AS parentId,manager_email AS managerEmail,sort_order AS sortOrder FROM org_units").all<OrgUnitRow>();
+  return (result.results || []) as OrgUnitRow[];
+}
+
+/** 同级重名检查；命中时返回 409 响应，未命中返回 null。 */
+async function rejectDuplicateUnit(name: string, parentId: number | null, id: number | null) {
+  const duplicate = findDuplicateUnit(await loadUnits(), { id, name, parentId });
+  if (!duplicate) return null;
+  return fail(`同一上级下已存在同名部门「${duplicate.name}」，请改名或挂到其他上级。`, 409);
+}
+
 async function upwardRecipients(email: string) {
-  const member = await runtime.DB.prepare("SELECT unit_id AS unitId,direct_manager_email AS directManager FROM org_members WHERE email=?").bind(email).first<{ unitId: number; directManager: string }>();
-  if (!member) return [] as string[];
-  const recipients = new Set<string>();
-  if (member.directManager) recipients.add(member.directManager);
-  let unitId: number | null = member.unitId;
-  for (let depth = 0; depth < 20 && unitId; depth++) {
-    const unit: { parentId: number | null; managerEmail: string } | null = await runtime.DB.prepare("SELECT parent_id AS parentId,manager_email AS managerEmail FROM org_units WHERE id=?").bind(unitId).first<{ parentId: number | null; managerEmail: string }>();
-    if (!unit) break;
-    if (unit.managerEmail && unit.managerEmail !== email) recipients.add(unit.managerEmail);
-    unitId = unit.parentId;
-  }
-  return [...recipients];
+  const [units, members] = await Promise.all([
+    loadUnits(),
+    runtime.DB.prepare("SELECT email,unit_id AS unitId,direct_manager_email AS directManagerEmail FROM org_members").all<OrgMemberRow>(),
+  ]);
+  return resolveUpwardRecipients(email, (members.results || []) as OrgMemberRow[], units);
 }
 
 const app = createApp();
@@ -132,8 +138,11 @@ app.post("*", async (c) => {
   if (body.action === "createUnit") {
     if (user.role !== "管理员") return fail("仅管理员可以调整企业架构。", 403);
     if (!body.name?.trim()) return fail("请填写组织名称。");
+    const parentId = Number(body.parentId) || null;
+    const conflict = await rejectDuplicateUnit(body.name, parentId, null);
+    if (conflict) return conflict;
     await runtime.DB.prepare("INSERT INTO org_units(name,unit_type,parent_id,manager_email,sort_order,created_by,created_at) VALUES(?,?,?,?,?,?,?)")
-      .bind(body.name.trim(), body.unitType || "部门", Number(body.parentId) || null, body.managerEmail?.trim().toLowerCase() || "", Number(body.sortOrder) || 0, user.email, now).run();
+      .bind(body.name.trim(), body.unitType || "部门", parentId, body.managerEmail?.trim().toLowerCase() || "", Number(body.sortOrder) || 0, user.email, now).run();
     await audit(user.email, "新增组织节点", body.name.trim(), `上级节点：${body.parentId || "无"}`);
   } else if (body.action === "updateUnit") {
     if (user.role !== "管理员") return fail("仅管理员可以调整企业架构。", 403);
@@ -147,6 +156,8 @@ app.post("*", async (c) => {
       const parent = await runtime.DB.prepare("SELECT parent_id AS parentId FROM org_units WHERE id=?").bind(cursor).first<{ parentId: number | null }>();
       cursor = parent?.parentId || null;
     }
+    const conflict = await rejectDuplicateUnit(body.name, parentId, id);
+    if (conflict) return conflict;
     await runtime.DB.prepare("UPDATE org_units SET name=?,unit_type=?,parent_id=?,manager_email=?,sort_order=? WHERE id=?")
       .bind(body.name.trim(), body.unitType || "部门", parentId, body.managerEmail?.trim().toLowerCase() || "", Number(body.sortOrder) || 0, id).run();
     await audit(user.email, "修改组织节点", body.name.trim(), `节点#${id} · 类型：${body.unitType || "部门"}`);
