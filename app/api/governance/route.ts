@@ -43,10 +43,14 @@ async function ensureSchema() {
   await ensureColumn(runtime.DB, "org_members", "direct_manager_email", "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(runtime.DB, "org_members", "status", "TEXT NOT NULL DEFAULT '在岗'");
   await ensureColumn(runtime.DB, "org_members", "updated_at", "TEXT NOT NULL DEFAULT ''");
+  // role_permissions 以自增 id 为主键，(role,capability) 上原本没有唯一约束，
+  // 导致下方 ON CONFLICT(role,capability) 报 "does not match any PRIMARY KEY or UNIQUE constraint"。
+  // 补幂等唯一索引，使 upsert 语义（同一角色+能力仅一条）成立。
+  await runtime.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_role_permissions_role_capability ON role_permissions(role,capability)").run();
 
   const now = new Date().toISOString();
   for (const [role, capability, decision] of defaults) {
-    const finalDecision = role === ADMIN_ROLE || capability === "collect_data" ? "允许" : decision;
+    const finalDecision = role === ADMIN_ROLE ? "允许" : decision;
     await runtime.DB.prepare("INSERT INTO role_permissions(role,capability,decision,updated_at) VALUES(?,?,?,?) ON CONFLICT(role,capability) DO UPDATE SET decision=role_permissions.decision,updated_at=excluded.updated_at")
       .bind(role, capability, finalDecision, now).run();
   }
@@ -54,8 +58,9 @@ async function ensureSchema() {
     await runtime.DB.prepare("INSERT INTO role_permissions(role,capability,decision,updated_at) VALUES(?,?,?,?) ON CONFLICT(role,capability) DO UPDATE SET decision='允许',updated_at=excluded.updated_at")
       .bind(ADMIN_ROLE, item.key, "允许", now).run();
   }
-  await runtime.DB.prepare("INSERT INTO role_permissions(role,capability,decision,updated_at) VALUES(?,?,?,?) ON CONFLICT(role,capability) DO UPDATE SET decision='允许',updated_at=excluded.updated_at")
-    .bind(STAFF_ROLE, "collect_data", "允许", now).run();
+  // 此前这里每次请求都把「普通员工 · collect_data」强制写回「允许」，
+  // 管理员在权限中心改成「拒绝」或「需审批」后会被下一次请求悄悄覆盖。
+  // 该能力对员工的默认值已由能力目录（_capabilities.ts）提供，无需在此强制。
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +200,9 @@ app.post("*", async (c) => {
     const capability = String(body.capability || "");
     const exists = catalog.some(item => item.key === capability);
     if (!exists) return fail("权限项不存在。");
-    const decision = role === ADMIN_ROLE || capability === "collect_data" ? "允许" : normalizeDecisionValue(body.decision);
+    // 此前这里对 collect_data 强制写「允许」，与 _auth.ts 的无条件放行构成双保险，
+    // 使权限中心对该能力的任何设置都无法落库。现按管理员选择正常保存。
+    const decision = role === ADMIN_ROLE ? "允许" : normalizeDecisionValue(body.decision);
     await runtime.DB.prepare("INSERT INTO role_permissions(role,capability,decision,updated_at) VALUES(?,?,?,?) ON CONFLICT(role,capability) DO UPDATE SET decision=excluded.decision,updated_at=excluded.updated_at")
       .bind(role, capability, decision, now).run();
     await audit(user.email, "修改权限", `${role} · ${capability}`, "成功", decision);
@@ -216,7 +223,7 @@ app.post("*", async (c) => {
       catalog.map(capability => ({
         role,
         capability: capability.key,
-        decision: role === ADMIN_ROLE || capability.key === "collect_data"
+        decision: role === ADMIN_ROLE
           ? "允许"
           : byKey.get(`${role}:${capability.key}`) || capability.employee,
       }))

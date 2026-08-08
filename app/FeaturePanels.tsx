@@ -42,6 +42,8 @@ type MonitoringDatum = Record<string, unknown> & {
 type MonitoringData = Record<string, unknown> & {
   summary?: Record<string, unknown>;
   totals?: Record<string, unknown>;
+  indicators?: Record<string, unknown>;
+  cleaning?: { inputRows?: number; usedRows?: number; dropped?: Array<{ reason: string; count: number }> };
   trend?: MonitoringDatum[];
   bars?: MonitoringDatum[];
 };
@@ -63,6 +65,18 @@ function safeJson<T>(value: string | undefined, fallback: T): T {
 function formatNumber(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number.toLocaleString("zh-CN", { maximumFractionDigits: 2 }) : "0";
+}
+
+// CTR、转化率是 0~1 的比值，统一走 formatNumber 会显示成 "0.02"，看上去和 0 没区别；
+// CPC、ROAS 则需要固定两位小数，不能被千分位整数格式吞掉小数。
+function formatPercent(value: unknown) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? `${(number * 100).toFixed(2)}%` : "0%";
+}
+
+function formatRatio(value: unknown) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toFixed(2) : "0.00";
 }
 
 async function readResult(response: Response) {
@@ -461,7 +475,11 @@ export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
     await load();
   }
 
-  const summary = current?.summary || current?.totals || {};
+  // CTR/CPC/转化率/ROAS 由后端放在 indicators 里，而这里过去只读 summary/totals，
+  // 于是四个衍生指标恒为 undefined，界面上永远显示 0。三者合并，历史报表也能正确回显。
+  const summary: Record<string, unknown> = { ...current?.totals, ...current?.indicators, ...current?.summary };
+  const cleaning = current?.cleaning;
+  const droppedTotal = (cleaning?.dropped || []).reduce((sum, item) => sum + item.count, 0);
   const trend = current?.trend || [];
   const bars = current?.bars || [];
   const maxSpend = Math.max(1, ...trend.map((item) => Number(item.spend ?? item.cost ?? 0)));
@@ -482,18 +500,23 @@ export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
 
       {current && <section className="dashboardBoard">
         <div className="metricGrid">
-          {[
-            ["花费", summary.spend ?? summary.cost],
-            ["曝光", summary.impressions],
-            ["点击", summary.clicks],
-            ["转化", summary.conversions],
-            ["销售额", summary.revenue],
-            ["CTR", summary.ctr],
-            ["CPC", summary.cpc],
-            ["转化率", summary.conversionRate ?? summary.cvr],
-            ["ROAS", summary.roas],
-          ].map(([label, value]) => <article key={String(label)}><span>{String(label)}</span><b>{formatNumber(value)}</b></article>) }
+          {([
+            ["花费", summary.spend ?? summary.cost, formatNumber],
+            ["曝光", summary.impressions, formatNumber],
+            ["点击", summary.clicks, formatNumber],
+            ["转化", summary.conversions, formatNumber],
+            ["销售额", summary.revenue, formatNumber],
+            ["CTR", summary.ctr, formatPercent],
+            ["CPC", summary.cpc, formatRatio],
+            ["转化率", summary.conversionRate ?? summary.cvr, formatPercent],
+            ["ROAS", summary.roas, formatRatio],
+          ] as Array<[string, unknown, (value: unknown) => string]>).map(([label, value, format]) => <article key={label}><span>{label}</span><b>{format(value)}</b></article>) }
         </div>
+        {cleaning && <p className="cleaningSummary">
+          {droppedTotal
+            ? `已剔除 ${droppedTotal} 行异常数据（${(cleaning.dropped || []).map(item => `${item.reason} ${item.count}`).join(" / ")}），实际统计 ${cleaning.usedRows} / ${cleaning.inputRows} 行。`
+            : `${cleaning.usedRows} 行数据全部参与统计，未发现合计行、空行或全零行。`}
+        </p>}
         <div className="featureGrid">
           <div className="chartPanel"><h3>趋势图</h3><div className="chartBars">{trend.map((item, index) => <span key={index} style={{ height: `${Math.max(8, Number(item.spend ?? item.cost ?? 0) / maxSpend * 160)}px` }} title={`${item.date}: ${item.spend ?? item.cost}`} />)}</div></div>
           <div className="chartPanel"><h3>柱状排行</h3><div className="rankBars">{bars.map((item) => <p key={item.name}><span>{item.name}</span><i style={{ width: `${Math.max(6, Number(item.value || 0) / maxBar * 100)}%` }} /><b>{formatNumber(item.value)}</b></p>)}</div></div>

@@ -21,7 +21,6 @@ export interface PermissionsPanelProps {
   // 角色规格（label/description/locked/defaultDecision）由后端下发，前端不再硬编码。
   permissionRoles: PermissionRoleSpec[];
   // collect_data 业务规则：员工也允许采集，但写死后端；改由 prop 注入。
-  alwaysAllowCapabilities: string[];
 }
 
 type GroupId = "chat" | "agent" | "data" | "system" | "content";
@@ -58,7 +57,7 @@ function decisionFor(role: PermissionRoleSpec, capability: PermissionCapability,
   return capability.employee as Decision;
 }
 
-export default function PermissionsPanel({ permissions, permissionDrafts, setPermissionDrafts, permissionDirty, setPermissionDirty, setNotice, loadGovernance, loadState, capabilityCatalog, capabilityGroups, permissionRoles, alwaysAllowCapabilities }: PermissionsPanelProps) {
+export default function PermissionsPanel({ permissions, permissionDrafts, setPermissionDrafts, permissionDirty, setPermissionDirty, setNotice, loadGovernance, loadState, capabilityCatalog, capabilityGroups, permissionRoles }: PermissionsPanelProps) {
   // 兼容：如果后端没下发角色（早期版本），回退到内置两条；正常情况下由父组件注入。
   const roles = useMemo(() => (permissionRoles.length > 0 ? permissionRoles : []), [permissionRoles]);
   const [activePage, setActivePage] = useState<string>("");
@@ -70,12 +69,10 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
   const staffRole = roles.find(role => !role.locked);
   const lockedRole = roles.find(role => role.locked);
   const editableRole = staffRole ?? roles[0];
-  const alwaysAllow = useMemo(() => new Set(alwaysAllowCapabilities), [alwaysAllowCapabilities]);
 
   function permissionValue(roleName: string, capability: PermissionCapability) {
     const role = roles.find(item => item.key === roleName);
     if (role?.locked) return role.defaultDecision as Decision;
-    if (alwaysAllow.has(capability.key)) return "允许" as Decision;
     return (permissionDrafts[permissionKey(roleName, capability.key)] || permissions.find(item => item.role === roleName && item.capability === capability.key)?.decision || capability.employee) as Decision;
   }
 
@@ -83,7 +80,7 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
     const role = roles.find(item => item.key === roleName);
     setPermissionDrafts(current => ({
       ...current,
-      [permissionKey(roleName, capability.key)]: (role?.locked || alwaysAllow.has(capability.key)) ? "允许" : decision,
+      [permissionKey(roleName, capability.key)]: role?.locked ? "允许" : decision,
     }));
     setPermissionDirty(true);
   }
@@ -287,7 +284,7 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
             {!collapsed && <div className="permissionsGroupGrid">
               {items.map(capability => {
                 const decision = (editableRole ? permissionValue(editableRole.key, capability) : "拒绝") as Decision;
-                const lockedCapability = alwaysAllow.has(capability.key) || (editableRole?.locked ?? false);
+                const lockedCapability = editableRole?.locked ?? false;
                 return <div key={capability.key} className={`permissionCard decision-${decision === "允许" ? "allow" : decision === "需审批" ? "review" : "deny"} ${lockedCapability ? "isLocked" : ""}`}>
                   <div className="permissionCardHead">
                     <strong>{capability.label}</strong>

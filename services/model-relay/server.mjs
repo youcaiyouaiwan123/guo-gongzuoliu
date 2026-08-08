@@ -1,11 +1,10 @@
-import dns from "node:dns";
 import http from "node:http";
-import https from "node:https";
-import net from "node:net";
+
+// 采集出网的实现拆到 collector.mjs：server.mjs 一被 import 就会监听端口，测试无法安全导入。
+import { MAX_COLLECT_BYTES, requestText, requestTextFollowingRedirects } from "./collector.mjs";
 
 const PORT = 8789;
 const TARGET = "https://claudecc.top/v1/chat/completions";
-const MAX_COLLECT_BYTES = 500_000;
 
 function json(response, status, body) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -19,95 +18,6 @@ async function readJson(request) {
   return text ? JSON.parse(text) : {};
 }
 
-function isBlockedIpv4(address) {
-  const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b] = parts;
-  return a === 0 || a === 10 || a === 127 || a >= 224
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 0)
-    || (a === 192 && b === 168)
-    || (a === 198 && (b === 18 || b === 19));
-}
-
-function isBlockedIp(address) {
-  if (net.isIPv4(address)) return isBlockedIpv4(address);
-  if (!net.isIPv6(address)) return true;
-  const normalized = address.toLowerCase();
-  if (normalized === "::" || normalized === "::1") return true;
-  if (normalized.startsWith("fc") || normalized.startsWith("fd") || /^fe[89ab]/.test(normalized)) return true;
-  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-  return mappedIpv4 ? isBlockedIpv4(mappedIpv4) : false;
-}
-
-async function assertPublicTarget(targetUrl) {
-  const parsed = new URL(targetUrl);
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname === "metadata.google.internal") {
-    throw new Error("collection target is not allowed");
-  }
-  const addresses = net.isIP(hostname)
-    ? [{ address: hostname }]
-    : await dns.promises.lookup(hostname, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some(item => isBlockedIp(item.address))) {
-    throw new Error("collection target is not allowed");
-  }
-}
-
-function requestText(targetUrl, options = {}) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(targetUrl);
-    const client = parsed.protocol === "https:" ? https : http;
-    const body = options.body ? Buffer.from(options.body, "utf8") : null;
-    const req = client.request(
-      parsed,
-      {
-        method: options.method || "GET",
-        timeout: options.timeout || 15000,
-        rejectUnauthorized: true,
-        ...(options.publicOnly ? {
-          lookup(hostname, lookupOptions, callback) {
-            dns.lookup(hostname, lookupOptions, (error, address, family) => {
-              if (error) return callback(error);
-              if (typeof address !== "string" || isBlockedIp(address)) return callback(new Error("collection target is not allowed"));
-              callback(null, address, family);
-            });
-          },
-        } : {}),
-        headers: {
-          "User-Agent": options.userAgent || "Haixin-Enterprise-Relay/1.0",
-          Accept: options.accept || "*/*",
-          ...(body ? { "Content-Type": "application/json", "Content-Length": body.length } : {}),
-          ...(options.headers || {}),
-        },
-      },
-      (res) => {
-        const chunks = [];
-        let size = 0;
-        res.on("data", (chunk) => {
-          if (options.maxBytes && size >= options.maxBytes) return;
-          const remaining = options.maxBytes ? options.maxBytes - size : chunk.length;
-          const piece = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
-          chunks.push(piece);
-          size += piece.length;
-        });
-        res.on("end", () => {
-          resolve({
-            status: res.statusCode || 0,
-            contentType: res.headers["content-type"] || "text/plain; charset=utf-8",
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      },
-    );
-    req.on("timeout", () => req.destroy(new Error(options.timeoutMessage || "request timeout")));
-    req.on("error", reject);
-    if (body) req.write(body);
-    req.end();
-  });
-}
 
 async function handleModelRelay(request, response) {
   const input = await readJson(request);
@@ -152,8 +62,7 @@ async function handleCollectorProxy(request, response) {
   }
 
   try {
-    await assertPublicTarget(parsed.toString());
-    const result = await requestText(parsed.toString(), {
+    const result = await requestTextFollowingRedirects(parsed.toString(), {
       method,
       timeout: 15000,
       publicOnly: true,
@@ -164,6 +73,8 @@ async function handleCollectorProxy(request, response) {
         "Accept-Language": forwardedHeaders["Accept-Language"] || forwardedHeaders["accept-language"] || "zh-CN,zh;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         Referer: parsed.origin + "/",
+        // 数据源自定义的鉴权头（Authorization、X-Api-Key 等）。跨 origin 跳转时会被自动丢弃。
+        ...(input.extraHeaders && typeof input.extraHeaders === "object" ? input.extraHeaders : {}),
       },
       maxBytes: MAX_COLLECT_BYTES,
     });
@@ -172,6 +83,8 @@ async function handleCollectorProxy(request, response) {
       httpStatus: result.status,
       contentType: result.contentType,
       body: result.body,
+      truncated: result.truncated,
+      finalUrl: result.finalUrl,
     });
   } catch (error) {
     return json(response, 502, {

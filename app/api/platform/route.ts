@@ -216,7 +216,7 @@ async function finish(eventId: string, reply: string, error = "") {
 }
 
 async function allowed(identity: Identity, action: string) {
-  if (identity.role === zh.admin || action === "collect_data") return true;
+  if (identity.role === zh.admin) return true;
   const row = await runtime.DB.prepare("SELECT allowed FROM role_permissions WHERE role=? AND permission=?")
     .bind(identity.role, action)
     .first<{ allowed: number }>()

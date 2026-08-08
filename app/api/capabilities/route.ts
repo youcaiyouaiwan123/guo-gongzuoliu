@@ -6,13 +6,10 @@ import { capabilityCatalog, capabilityGroups, permissionRoles } from "../_capabi
 
 export const runtime = "edge";
 
-// 业务规则：员工也强制允许的能力键（与角色无关的全局规则），由后端统一下发。
-const ALWAYS_ALLOW_KEYS = ["collect_data"] as const;
-
 const app = createApp();
 
 app.get("*", async (c) => {
-  return success({ capabilities: capabilityCatalog, groups: capabilityGroups, roles: permissionRoles, alwaysAllow: ALWAYS_ALLOW_KEYS });
+  return success({ capabilities: capabilityCatalog, groups: capabilityGroups, roles: permissionRoles });
 });
 
 export const GET = (request: Request) => app.fetch(request);

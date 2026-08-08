@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent } from "react";
-import type { ModelConnection, ModelStatus } from "../shared-types";
+import type { ModelConnection, ModelStatus, Tab } from "../shared-types";
 import { ALL_PRESET_MODELS, MODEL_PRESETS } from "../constants";
 import { cleanModelText, formatModelOption, inferModelProvider, modelProviderMark } from "../shared-utils";
 import { PlusIcon, ChevronDownIcon, ChevronUpIcon } from "../../components/icons";
@@ -25,13 +25,14 @@ export interface ModelsPanelProps {
   modelMode: string;
   setModelMode: React.Dispatch<React.SetStateAction<string>>;
   setNotice: (message: string) => void;
+  setTab: React.Dispatch<React.SetStateAction<Tab>>;
   loadModelStatus: () => Promise<void>;
   deleteBatch: (urls: string[]) => Promise<{ ok: number; failed: number }>;
   setAllSelectedIds: (ids: number[], setIds: (value: number[]) => void, checked: boolean) => void;
   toggleSelectedId: (ids: number[], setIds: (value: number[]) => void, id: number) => void;
 }
 
-export default function ModelsPanel({ modelStatus, selectedPresetModels, setSelectedPresetModels, presetApiKey, setPresetApiKey, addingPresetModels, setAddingPresetModels, showCustomModel, setShowCustomModel, editingModel, setEditingModel, testingModel, setTestingModel, selectedModelConnectionIds, setSelectedModelConnectionIds, modelMode, setModelMode, setNotice, loadModelStatus, deleteBatch, setAllSelectedIds, toggleSelectedId }: ModelsPanelProps) {
+export default function ModelsPanel({ modelStatus, selectedPresetModels, setSelectedPresetModels, presetApiKey, setPresetApiKey, addingPresetModels, setAddingPresetModels, showCustomModel, setShowCustomModel, editingModel, setEditingModel, testingModel, setTestingModel, selectedModelConnectionIds, setSelectedModelConnectionIds, modelMode, setModelMode, setNotice, setTab, loadModelStatus, deleteBatch, setAllSelectedIds, toggleSelectedId }: ModelsPanelProps) {
   async function testModel(id?: number) {
     setTestingModel(true);
     const response = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
@@ -114,7 +115,7 @@ export default function ModelsPanel({ modelStatus, selectedPresetModels, setSele
 
   return <section className="contentPanel pageFill modelsPage">
     <div className="pageScroll">
-      <div className="sectionTitle"><div><h2>模型服务入口</h2></div></div>
+      <div className="sectionTitle"><div><h2>模型服务入口</h2></div><button type="button" className="modelLinkButton" onClick={()=>setTab("chat")} title="返回智能助手对话">← 返回智能助手</button></div>
       <div className="providerGrid"><a className="providerLinkCard" href="https://www.claudecc.top" target="_blank" rel="noreferrer"><span className="providerMark">海</span><div><h3>ClaudeCC 模型服务</h3><p>第三方模型服务平台</p><small>www.claudecc.top</small></div><em>一键访问 →</em></a></div>
       <div className="sectionTitle"><div><h2>我的第三方模型接入</h2></div><span className={modelStatus?.configured ? "policyBadge" : "warningBadge"}>{modelStatus?.configured ? `${modelStatus.connections.length} 个模型连接` : "等待填写我的API"}</span></div>
       <div className="modelSummary">

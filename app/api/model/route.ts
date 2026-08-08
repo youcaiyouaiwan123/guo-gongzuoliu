@@ -24,7 +24,7 @@ function inferModelProvider(model = "") {
 
 function hasDirtyDisplayText(value = "") {
   const text = value.trim();
-  return !text || text.includes("?") || text.includes("") || /[鏅閫鏈绗妯鍑浼绠澶璇鈥俙銆]/.test(text);
+  return !text || text.includes("?") || text.includes("\ufffd") || /[鏅閫鏈绗妯鍑浼绠澶璇鈥俙銆]/.test(text);
 }
 
 function cleanProvider(provider = "", model = "") {
@@ -69,10 +69,10 @@ async function schema() {
       WHEN lower(model_name) LIKE '%gpt%' THEN 'OpenAI'
       ELSE 'Third-party Model'
     END
-    WHERE provider='' OR provider LIKE '%?%' OR provider LIKE '%%'`).run();
+    WHERE provider='' OR provider LIKE '%?%' OR provider LIKE '%' || char(65533) || '%'`).run();
   await runtime.DB.prepare(`UPDATE user_model_profiles
     SET connection_name = provider || ' · ' || model_name
-    WHERE connection_name='' OR connection_name LIKE '%?%' OR connection_name LIKE '%%'`).run();
+    WHERE connection_name='' OR connection_name LIKE '%?%' OR connection_name LIKE '%' || char(65533) || '%'`).run();
 }
 
 async function records(email: string) {

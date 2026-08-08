@@ -69,6 +69,7 @@ export async function ensureAuthTables(db: D1Database) {
   await db.prepare("CREATE TABLE IF NOT EXISTS user_roles (email TEXT PRIMARY KEY,role TEXT NOT NULL DEFAULT '普通员工',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS frontend_users (email TEXT PRIMARY KEY,display_name TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '启用',email_verified_at TEXT DEFAULT '',last_login_at TEXT DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS login_sessions (token TEXT PRIMARY KEY,email TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS user_security (email TEXT PRIMARY KEY,password_hash TEXT NOT NULL,password_salt TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT,role TEXT NOT NULL,capability TEXT NOT NULL,decision TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(role,capability))").run();
   // 历史脏数据的规范化已移到迁移 0019_normalize_legacy_values.sql 一次性执行。
   // 此前在这里对 user_roles、frontend_users、role_permissions 做全表扫描并逐行写回，
@@ -129,7 +130,10 @@ export async function authenticate(request: Request, db: D1Database, adminOnly =
 }
 
 export async function authorizeCapability(db: D1Database, user: AppUser, capability: string): Promise<Response | null> {
-  if (user.role === ADMIN_ROLE || capability === "collect_data") return null;
+  // collect_data 曾在这里无条件放行，导致权限中心对该能力的设置完全失效。
+  // 能力目录里它对普通员工的默认值本就是「允许」，交由下面的常规判定即可保持默认行为，
+  // 同时让管理员改成「需审批」或「拒绝」时真正生效。
+  if (user.role === ADMIN_ROLE) return null;
   await ensureAuthTables(db);
   const policy = await db.prepare("SELECT decision FROM role_permissions WHERE role=? AND capability=?")
     .bind(user.role, capability)

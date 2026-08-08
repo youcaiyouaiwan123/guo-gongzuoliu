@@ -102,7 +102,7 @@ export default function UsersPanel({ users, setNotice, loadSession }: UsersPanel
     setBusy(true);
     const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
     const data = await response.json();
-    setNotice(response.ok ? "账号角色已保存" : data.error || "保存失败");
+    setNotice(response.ok ? data.message || "账号角色已保存" : data.error || "保存失败");
     if (response.ok) { event.currentTarget.reset(); await loadSession(); }
     setBusy(false);
   }

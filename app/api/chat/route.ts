@@ -72,19 +72,17 @@ function compressOlderHistory(items: Array<{ role: string; content: string }>) {
 function extractKnowledgeTerms(input: string) {
   const terms = new Set<string>();
   const stopWords = new Set(["请帮", "帮我", "我要", "需要", "查询", "查找", "检索", "调用", "根据", "使用", "知识", "知识库", "资料", "资料库", "个人知识", "企业知识"]);
+  // 提取英文词（2 字符以上），限制最大长度防止超出 SQLite LIKE 模式上限（D1 约 50 字节）
   for (const word of input.toLowerCase().match(/[a-z0-9_-]{2,}/g) || []) {
-    if (!stopWords.has(word)) terms.add(word);
+    if (!stopWords.has(word)) terms.add(word.slice(0, 15));
   }
+  // \u63d0\u53d6\u5b8c\u6574\u4e2d\u6587\u5757\uff082 \u5b57\u4ee5\u4e0a\uff09\uff0c\u9650\u5236\u6700\u5927\u957f\u5ea6\u5230 15 \u5b57\uff0845 \u5b57\u8282 UTF-8\uff0c`%%` \u540e\u4ecd\u5728\u5b89\u5168\u8303\u56f4\uff09\u3002
+  // \u79fb\u9664 2/3/4 \u5b57\u6ed1\u7a97\u5207\u5206\uff1a\u5b83\u4ea7\u751f\u5927\u91cf\u788e\u7247\u4e14\u957f\u6d88\u606f\u65f6\u7d2f\u79ef\u51fa\u8d85\u957f\u6a21\u5f0f\u5bfc\u81f4 D1 \u62a5 "pattern too complex"\u3002
   for (const chunk of input.match(/[\u4e00-\u9fff]{2,}/g) || []) {
-    if (!stopWords.has(chunk)) terms.add(chunk);
-    for (const size of [2, 3, 4]) {
-      for (let index = 0; index <= chunk.length - size; index += 1) {
-        const term = chunk.slice(index, index + size);
-        if (!stopWords.has(term)) terms.add(term);
-      }
-    }
+    const limited = chunk.slice(0, 15);
+    if (!stopWords.has(limited) && !stopWords.has(chunk)) terms.add(limited);
   }
-  return Array.from(terms).sort((left, right) => right.length - left.length).slice(0, 12);
+  return Array.from(terms).sort((left, right) => right.length - left.length).slice(0, 10);
 }
 
 async function ensureSchema() {
@@ -244,9 +242,9 @@ app.post("*", async (c) => {
     if (words.length) {
       personalSql += ` AND (${words.map(() => "(title LIKE ? OR content LIKE ?)").join(" OR ")})`;
       for (const word of words) { const like = `%${word}%`; personalBinds.push(like, like); }
-    } else {
-      personalSql += " AND 1=0";
     }
+    // 无检索关键词时，不再强制 AND 1=0（原逻辑导致个人知识永远查不到）；
+    // 查询已限定 owner_email 且 LIMIT 8，直接返回该用户最近的个人知识即可。
     personalSql += " ORDER BY updated_at DESC,id DESC LIMIT 8";
     const [personalKnowledgeRows, artifactRows, agentRows, workflowRows, sourceRows, approvalRows, contractTemplateRows, contractDocumentRows, monitoringRows] = await runtime.DB.batch([
       runtime.DB.prepare(personalSql).bind(...personalBinds),

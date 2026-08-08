@@ -196,15 +196,28 @@ function ensureText(text: string, protocol: string) {
   return value;
 }
 
+/**
+ * OpenAI 兼容的多模态消息体。
+ * content 为字符串时是纯文本消息；为数组时可以混排文字与图片（截图识别走这条路）。
+ * 两条发送路径都是把 messages 原样序列化后转发，无需按形态分支。
+ */
+export type ModelMessageContent =
+  | string
+  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
+export type ModelMessage = { role: string; content: ModelMessageContent };
+
 export async function callModel(
   connection: ModelConnection,
-  messages: Array<{ role: string; content: string }>,
+  messages: ModelMessage[],
   options: { maxTokens?: number; temperature?: number } = {},
 ) {
   // This deployment intentionally routes every vendor/model through the same
   // OpenAI-compatible endpoint, so stored URLs cannot accidentally leak keys.
   const maxTokens = options.maxTokens || 1600;
-  const temperature = options.temperature ?? 0.2;
+  const temperatureField = modelSupportsTemperature(connection.model)
+    ? { temperature: options.temperature ?? 0.2 }
+    : {};
 
   if (runtime.MODEL_RELAY_URL) {
     const response = await fetchWithTimeout(runtime.MODEL_RELAY_URL, {
@@ -215,7 +228,7 @@ export async function callModel(
         model: connection.model,
         messages,
         max_tokens: maxTokens,
-        temperature,
+        ...temperatureField,
       }),
     }, TEXT_MODEL_TIMEOUT_MS, "模型中转服务");
     const { payload, text } = await readPayload(response);
@@ -234,7 +247,7 @@ export async function callModel(
     body: JSON.stringify({
       model: connection.model,
       max_tokens: maxTokens,
-      temperature,
+      ...temperatureField,
       messages,
     }),
   }, TEXT_MODEL_TIMEOUT_MS, "模型接口");
@@ -300,6 +313,18 @@ function extractImagesFromMarkdown(text: string): Array<{ url?: string; dataUrl?
 function isGeminiNativeImageModel(model: string): boolean {
   const name = model.toLowerCase();
   return name.includes("gemini") && !name.includes("imagen");
+}
+
+// 新一代模型（GPT-5 系列、o 系列推理模型）不接受自定义 temperature，
+// 传入会被上游忽略并回 "temperature is deprecated" 警告。省略该参数始终安全
+// （模型使用自身默认值），因此这里据模型名判断，只对支持的模型发送 temperature。
+function modelSupportsTemperature(model: string): boolean {
+  const name = model.toLowerCase().trim();
+  // o 系列推理模型：o1 / o3 / o4-mini 等（注意 gpt-4o 不属于此列）
+  if (/(?:^|[/\s])o[0-9]/.test(name)) return false;
+  // GPT-5 及更新版本
+  if (/gpt-?[5-9]/.test(name)) return false;
+  return true;
 }
 
 export async function callImageModel(
@@ -443,7 +468,9 @@ export async function callModelWithTools(
   } = {},
 ): Promise<{ text: string; toolCalls: ToolCallResult[] }> {
   const maxTokens = options.maxTokens || 3200;
-  const temperature = options.temperature ?? 0.2;
+  const temperatureField = modelSupportsTemperature(connection.model)
+    ? { temperature: options.temperature ?? 0.2 }
+    : {};
   const maxToolCalls = options.maxToolCalls || 10;
   const toolResults: ToolCallResult[] = [];
   let currentMessages = [...messages];
@@ -460,7 +487,7 @@ export async function callModelWithTools(
         body: JSON.stringify({
           model: connection.model,
           max_tokens: maxTokens,
-          temperature,
+          ...temperatureField,
           messages: currentMessages,
           tools: tools.map(t => ({
             type: "function",
