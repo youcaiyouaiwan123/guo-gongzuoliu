@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { createApp, auth, success, fail, ADMIN_ROLE } from "../_app";
 import { extractTextFromFile } from "../_fileText";
 import { ensureColumn } from "../_schema";
+import { askModel } from "../modules/_shared";
+import { KNOWLEDGE_POLISH_INSTRUCTION, markPolished } from "../_knowledgeText";
 
 type RuntimeEnv = { DB: D1Database };
 const runtime = env as unknown as RuntimeEnv;
@@ -43,7 +45,7 @@ async function ensureSchema() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT ''
     )`),
-    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (id INTEGER PRIMARY KEY AUTOINCREMENT,unit_id INTEGER NOT NULL,email TEXT NOT NULL,position TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在职',created_at TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT '')"),
+    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (email TEXT PRIMARY KEY,unit_id INTEGER NOT NULL,job_title TEXT NOT NULL DEFAULT '员工',direct_manager_email TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在岗',updated_at TEXT NOT NULL)"),
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,resource TEXT NOT NULL,result TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL)"),
   ]);
   await ensureColumn(runtime.DB, "knowledge_documents", "department_id", "INTEGER");
@@ -70,7 +72,8 @@ async function readDeleteIds(request: Request) {
 }
 
 async function getMembership(email: string) {
-  return runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=? AND status <> '离职' AND status <> '绂昏亴' ORDER BY id DESC LIMIT 1")
+  // org_members 以 email 为主键，没有自增 id 列；ORDER BY id 会报 no such column: id。
+  return runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=? AND status <> '离职' AND status <> '绂昏亴' ORDER BY updated_at DESC LIMIT 1")
     .bind(email)
     .first<{ unitId: number }>();
 }
@@ -121,17 +124,40 @@ app.post("*", async (c) => {
     return success({ item: saved[0], items: saved, message: `已保存 ${saved.length} 条个人知识。` }, 201);
   }
 
-  const body = await c.req.json() as { title?: string; content?: string; sourceType?: string; conversationId?: number };
+  const body = await c.req.json() as { title?: string; content?: string; sourceType?: string; conversationId?: number; polish?: boolean };
   const title = body.title?.trim();
   const content = body.content?.trim();
   if (!title || !content) return fail("知识名称和内容不能为空。", 400);
+
+  // 可选的 AI 整理。整理失败不该让保存整体失败——用户的原文是真数据，
+  // 模型没配好只是附加能力缺失，所以退回保存原文并在来源标注里写明。
+  let stored = content;
+  let polishState: "done" | "failed" | "off" = "off";
+  if (body.polish) {
+    try {
+      const polished = (await askModel(user.email, KNOWLEDGE_POLISH_INSTRUCTION, content.slice(0, 16000))).trim();
+      if (polished) { stored = polished; polishState = "done"; } else { polishState = "failed"; }
+    } catch {
+      polishState = "failed";
+    }
+  }
+  const sourceType = markPolished(body.sourceType || "手动创建", polishState);
+
   const row = await runtime.DB.prepare(`INSERT INTO personal_knowledge(owner_email,title,content,source_type,conversation_id,sync_status,created_at,updated_at) VALUES(?,?,?,?,?,'仅个人',?,?) RETURNING ${fields}`)
-    .bind(user.email, title, content.slice(0, 500_000), body.sourceType || "手动创建", body.conversationId || null, now, now)
+    .bind(user.email, title, stored.slice(0, 500_000), sourceType, body.conversationId || null, now, now)
     .first();
   await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
-    .bind(user.email, "保存个人知识", title, "成功", body.sourceType || "手动创建", now)
+    .bind(user.email, "保存个人知识", title, "成功", sourceType, now)
     .run();
-  return success({ item: row, message: "已保存到个人知识库。" }, 201);
+  return success({
+    item: row,
+    polished: polishState === "done",
+    message: polishState === "done"
+      ? "已用 AI 整理后保存到个人知识库。"
+      : polishState === "failed"
+        ? "AI 整理未成功，已按原文保存到个人知识库。"
+        : "已保存到个人知识库。",
+  }, 201);
 });
 
 // PATCH /api/personal-knowledge — 同步个人知识到企业知识
@@ -151,8 +177,8 @@ app.patch("*", async (c) => {
   const now = new Date().toISOString();
   const fileMeta = inferKnowledgeFileMeta(item.title, item.sourceType, item.content);
   const created = await runtime.DB.prepare(`INSERT INTO knowledge_documents(title,content,visibility,department_id,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,1,'手动更新','','已解析',?,?,?) RETURNING id`)
-    .bind(item.title, item.content, visibility, visibility === "部门" ? membership?.unitId : null, fileMeta.filename, fileMeta.mimeType, "", body.category || "个人知识同步", body.tags || "个人知识", new TextEncoder().encode(item.content).byteLength, user.email, now, now)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`)
+    .bind(item.title, item.content, visibility, visibility === "部门" ? membership?.unitId : null, fileMeta.filename, fileMeta.mimeType, "", body.category || "个人知识同步", body.tags || "个人知识", 1, "手动更新", "", "已解析", new TextEncoder().encode(item.content).byteLength, user.email, now, now)
     .first<{ id: number }>();
   await runtime.DB.prepare("UPDATE personal_knowledge SET sync_status='已同步企业知识',enterprise_document_id=?,updated_at=? WHERE id=?")
     .bind(created?.id || null, now, item.id)

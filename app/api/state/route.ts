@@ -4,8 +4,13 @@ import { env } from "cloudflare:workers";
 import { createApp, auth, success, fail, authorizeCapability, ADMIN_ROLE } from "../_app";
 import { extractTextFromFile } from "../_fileText";
 import { ensureColumn } from "../_schema";
+import { askModel } from "../modules/_shared";
+import { KNOWLEDGE_POLISH_INSTRUCTION, markPolished } from "../_knowledgeText";
 
-type RuntimeEnv = { DB: D1Database; FILES: R2Bucket };
+// R2 绑定名以构建产物 dist/server/wrangler.json 的 r2_buckets 为准，当前为 "R2"
+// （由 vite.config.ts 的 VITE_R2_BINDING 默认值生成）。此前这里写作 FILES，
+// 运行时取到 undefined，知识库文件的上传/下载/删除全部 500。
+type RuntimeEnv = { DB: D1Database; R2: R2Bucket };
 const runtime = env as unknown as RuntimeEnv;
 
 const fields = "id,title,content,visibility,department_id AS departmentId,filename,mime_type AS mimeType,category,tags,version,update_mode AS updateMode,update_schedule AS updateSchedule,status,size_bytes AS sizeBytes,created_by AS createdBy,created_at AS createdAt,updated_at AS updatedAt";
@@ -33,7 +38,8 @@ async function ensureSchema() {
       updated_at TEXT NOT NULL DEFAULT ''
     )`),
     runtime.DB.prepare("CREATE INDEX IF NOT EXISTS knowledge_documents_updated_idx ON knowledge_documents(updated_at)"),
-    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (id INTEGER PRIMARY KEY AUTOINCREMENT,unit_id INTEGER NOT NULL,email TEXT NOT NULL,position TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在职',created_at TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT '')"),
+    // 与 organization/governance/chat 等处保持一致：email 为主键，无自增 id。
+    runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (email TEXT PRIMARY KEY,unit_id INTEGER NOT NULL,job_title TEXT NOT NULL DEFAULT '员工',direct_manager_email TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在岗',updated_at TEXT NOT NULL)"),
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,resource TEXT NOT NULL,result TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL)"),
   ]);
   await ensureColumn(runtime.DB, "knowledge_documents", "department_id", "INTEGER");
@@ -62,7 +68,9 @@ function canReadKnowledge(item: { visibility?: string; departmentId?: number | n
 }
 
 async function getMembership(email: string) {
-  return runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=? AND status <> '离职' ORDER BY id DESC LIMIT 1")
+  // org_members 以 email 为主键，没有自增 id 列；此前 ORDER BY id 会报 no such column: id，
+  // 导致查询部门归属失败，进而 GET/POST /api/state 全部 500（企业知识无法上传）。
+  return runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=? AND status <> '离职' ORDER BY updated_at DESC LIMIT 1")
     .bind(email)
     .first<{ unitId: number }>();
 }
@@ -104,7 +112,7 @@ app.get("*", async (c) => {
         },
       });
     }
-    const object = item.fileKey ? await runtime.FILES.get(item.fileKey) : null;
+    const object = item.fileKey ? await runtime.R2.get(item.fileKey) : null;
     if (!object) return new Response("原文件不存在", { status: 404 });
     return new Response(object.body, {
       headers: {
@@ -165,7 +173,7 @@ app.post("*", async (c) => {
 
     for (const file of files) {
       const key = `knowledge/${crypto.randomUUID()}/${file.name}`;
-      await runtime.FILES.put(key, file.stream(), {
+      await runtime.R2.put(key, file.stream(), {
         httpMetadata: { contentType: file.type || "application/octet-stream" },
         customMetadata: { owner: actor },
       });
@@ -182,7 +190,7 @@ app.post("*", async (c) => {
     return success({ documents: saved }, 201);
   }
 
-  const body = await c.req.json() as { type?: string; title?: string; content?: string; visibility?: string; departmentId?: number; category?: string; tags?: string; updateMode?: string; updateSchedule?: string };
+  const body = await c.req.json() as { type?: string; title?: string; content?: string; visibility?: string; departmentId?: number; category?: string; tags?: string; updateMode?: string; updateSchedule?: string; polish?: boolean };
   const title = body.title?.trim();
   const content = body.content?.trim();
   if (body.type !== "document" || !title || !content) return fail("请填写资料名称和内容。", 400);
@@ -191,13 +199,37 @@ app.post("*", async (c) => {
   const departmentId = user.role === ADMIN_ROLE ? Number(body.departmentId) || null : membership?.unitId || null;
   if (visibility === "部门" && !departmentId) return fail("请先加入部门，或由管理员选择资料所属部门。", 400);
 
+  // 可选的 AI 整理，与个人知识用同一份提示词。整理失败退回原文保存，
+  // 不让附加能力的缺失（比如没配模型密钥）挡住用户存资料。
+  let stored = content;
+  let polishState: "done" | "failed" | "off" = "off";
+  if (body.polish) {
+    try {
+      const polished = (await askModel(actor, KNOWLEDGE_POLISH_INSTRUCTION, content.slice(0, 16000))).trim();
+      if (polished) { stored = polished; polishState = "done"; } else { polishState = "failed"; }
+    } catch {
+      polishState = "failed";
+    }
+  }
+  // 整理过的内容在标签上留痕，事后才分得清哪些正文被模型动过。
+  const baseTags = body.tags?.trim() || "";
+  const tags = polishState === "off" ? baseTags : markPolished(baseTags, polishState).replace(/^\s*·\s*/, "");
+
   const saved = await runtime.DB.prepare(`INSERT INTO knowledge_documents(title,content,visibility,department_id,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING ${fields}`)
-    .bind(title, content, visibility, departmentId, `${title}.md`, "text/markdown", "", body.category || "未分类", body.tags || "", 1, body.updateMode || "手动更新", body.updateSchedule || "", "已解析", new TextEncoder().encode(content).byteLength, actor, now, now)
+    .bind(title, stored, visibility, departmentId, `${title}.md`, "text/markdown", "", body.category || "未分类", tags, 1, body.updateMode || "手动更新", body.updateSchedule || "", "已解析", new TextEncoder().encode(stored).byteLength, actor, now, now)
     .first();
   await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
-    .bind(actor, "添加知识", title, "成功", `${body.category || "未分类"} · ${visibility}`, now)
+    .bind(actor, "添加知识", title, "成功", `${body.category || "未分类"} · ${visibility}${polishState === "off" ? "" : polishState === "done" ? " · AI整理" : " · AI整理失败已存原文"}`, now)
     .run();
-  return success({ document: saved }, 201);
+  return success({
+    document: saved,
+    polished: polishState === "done",
+    message: polishState === "done"
+      ? "已用 AI 整理后保存。"
+      : polishState === "failed"
+        ? "AI 整理未成功，已按原文保存。"
+        : "资料已保存。",
+  }, 201);
 });
 
 // DELETE /api/state — 删除知识库文档或审计记录
@@ -247,7 +279,7 @@ app.delete("*", async (c) => {
       .first<{ title: string; fileKey?: string; createdBy: string }>();
     if (!item) continue;
     if (user.role !== ADMIN_ROLE && item.createdBy !== user.email) continue;
-    if (item.fileKey) await runtime.FILES.delete(item.fileKey).catch(() => undefined);
+    if (item.fileKey) await runtime.R2.delete(item.fileKey).catch(() => undefined);
     await runtime.DB.prepare("DELETE FROM knowledge_documents WHERE id=?").bind(id).run();
     deletedTitles.push(item.title);
   }
