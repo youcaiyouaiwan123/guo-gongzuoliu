@@ -5,7 +5,8 @@
  * 每个 skill 包含 OpenAI 兼容的 tool schema 和执行函数。
  */
 
-import { runtime, audit } from "./_shared";
+import { assertPublicCollectionUrl } from "../_urlGuard";
+import { crawlPages, htmlToText, decodeHtml, applyContentSelector, extractLinks } from "../_crawler";
 
 // ─── 类型定义 ───────────────────────────────────────────
 
@@ -56,33 +57,6 @@ const registryDefinitions = new Map<string, SkillDefinition>();
 
 // ─── 工具函数 ───────────────────────────────────────────
 
-function htmlToText(value: string) {
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function decodeHtml(value: string) {
-  return value
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function splitCsvLine(line: string) {
   const cells: string[] = [];
   let cell = "", quoted = false;
@@ -95,6 +69,43 @@ function splitCsvLine(line: string) {
   }
   cells.push(cell.trim());
   return cells;
+}
+
+/**
+ * 出网前逐跳校验的 fetch
+ *
+ * 这里的 URL 由模型自行决定（用户可以在采集需求里诱导它），和用户直接填写的采集地址是同一类
+ * 不可信输入，必须走 assertPublicCollectionUrl。而 fetch 默认自动跟随重定向会绕过这道校验——
+ * 一个公网地址 302 到 169.254.169.254 就能把云元数据取回来，所以改成手动跟随、每一跳都重新校验。
+ * 判定规则与 _collection.ts 的 fetchForCollection 保持一致。
+ */
+async function safeFetch(
+  url: URL,
+  options: { method?: string; headers?: Record<string, string>; timeoutMs?: number } = {},
+) {
+  const { method = "GET", headers = {}, timeoutMs = 15000 } = options;
+  assertPublicCollectionUrl(url);
+  let current = url;
+  for (let hop = 0; hop < 5; hop += 1) {
+    const response = await fetch(current.toString(), {
+      method,
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.status < 300 || response.status >= 400) return { response, finalUrl: current };
+    const location = response.headers.get("location");
+    if (!location) return { response, finalUrl: current };
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new Error("重定向目标无法解析");
+    }
+    assertPublicCollectionUrl(next);
+    current = next;
+  }
+  throw new Error("重定向次数过多");
 }
 
 // ─── Skill 1: fetchUrl ──────────────────────────────────
@@ -123,11 +134,7 @@ register("fetchUrl", {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
   };
   try {
-    const response = await fetch(url.toString(), {
-      method,
-      headers: browserHeaders,
-      signal: AbortSignal.timeout(20000),
-    });
+    const { response } = await safeFetch(url, { method, headers: browserHeaders, timeoutMs: 20000 });
     const raw = (await response.text()).slice(0, 500000);
     return {
       success: true,
@@ -144,26 +151,6 @@ register("fetchUrl", {
 });
 
 // ─── Skill 2: crawlWebsite ──────────────────────────────
-
-function extractLinks(html: string, base: URL, includePattern = "", excludePattern = "") {
-  const links = new Set<string>();
-  const regex = /href\s*=\s*["']([^"']+)["']/gi;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(html))) {
-    const href = match[1];
-    if (!href || href.startsWith("#") || /^javascript:/i.test(href) || /^mailto:/i.test(href) || /^tel:/i.test(href)) continue;
-    try {
-      const next = new URL(href, base);
-      next.hash = "";
-      if (next.origin !== base.origin) continue;
-      if (/\.(png|jpe?g|gif|svg|webp|ico|css|js|pdf|zip|rar|7z|mp4|mp3|wav|avi|mov|xlsx?|docx?|pptx?)$/i.test(next.pathname)) continue;
-      if (includePattern && !new RegExp(escapeRegExp(includePattern).replace(/\\\*/g, ".*"), "i").test(next.toString())) continue;
-      if (excludePattern && new RegExp(escapeRegExp(excludePattern).replace(/\\\*/g, ".*"), "i").test(next.toString())) continue;
-      links.add(next.toString());
-    } catch { /* 跳过非法 URL */ }
-  }
-  return Array.from(links);
-}
 
 register("crawlWebsite", {
   name: "crawlWebsite",
@@ -190,62 +177,51 @@ register("crawlWebsite", {
   let seed: URL;
   try { seed = new URL(urlStr); } catch { return { success: false, error: "URL 格式不正确" }; }
   seed.hash = "";
-  const queue: Array<{ url: URL; depth: number }> = [{ url: seed, depth: 0 }];
-  const visited = new Set<string>();
+  // 单页抓取失败会被循环内的 catch 吞掉，种子地址不合法必须在进入循环前就明确报错，
+  // 否则内网地址只会得到一句"未采集到可用页面"。
+  try {
+    assertPublicCollectionUrl(seed);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "种子地址不合法" };
+  }
   const pages: Array<{ url: string; title: string; text: string }> = [];
   const browserHeaders = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
   };
-  while (queue.length && pages.length < maxPages) {
-    const current = queue.shift()!;
-    const key = current.url.toString();
-    if (visited.has(key)) continue;
-    visited.add(key);
-    try {
-      const response = await fetch(current.url.toString(), {
-        method: "GET",
-        headers: browserHeaders,
-        signal: AbortSignal.timeout(15000),
-      });
-      if (response.status < 200 || response.status >= 300) continue;
-      const raw = await response.text();
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("text/html")) continue;
-      const selectedRaw = contentSelector ? applyContentSelector(raw, contentSelector) : raw;
-      const text = htmlToText(decodeHtml(selectedRaw));
-      if (!text.trim() || text.replace(/\s+/g, "").length < 20) continue;
-      const title = (raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || current.url.pathname || current.url.hostname).trim();
-      pages.push({ url: key, title: htmlToText(decodeHtml(title)).slice(0, 120), text: text.slice(0, 12000) });
-      if (current.depth < depth) {
-        for (const link of extractLinks(raw, current.url, includePattern, excludePattern)) {
-          if (!visited.has(link) && queue.length + pages.length < maxPages * 3) {
-            queue.push({ url: new URL(link), depth: current.depth + 1 });
-          }
-        }
-      }
-    } catch { /* 跳过抓取失败的页面 */ }
+  try {
+    // 抓取循环与"数据采集"模块共用 _crawler：这边注入的是直连（含逐跳 SSRF 校验）的出网实现，
+    // 采集那边注入的是走采集代理的实现。
+    const { pages: crawled } = await crawlPages(
+      seed,
+      { maxPages, depth, includePattern, excludePattern, contentSelector },
+      async url => {
+        const { response } = await safeFetch(url, { headers: browserHeaders, timeoutMs: 15000 });
+        return {
+          httpStatus: response.status,
+          contentType: response.headers.get("content-type") || "",
+          raw: await response.text(),
+        };
+      },
+    );
+    // 受限页（验证码墙、登录墙、429）对模型没有价值，交给它只会被当成正文总结出去。
+    const usable = crawled.filter(page => !page.blocked);
+    if (!usable.length) {
+      const blockedCount = crawled.length;
+      return {
+        success: false,
+        error: blockedCount
+          ? `采集到的 ${blockedCount} 个页面都是登录墙/验证码/错误页，未取得正文。请换用该站的 API、RSS，或改用 readWebPage。`
+          : "未采集到可用页面，请检查 URL 或网站权限",
+      };
+    }
+    pages.push(...usable.map(page => ({ url: page.url, title: page.title, text: page.text })));
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "爬取失败" };
   }
-  if (!pages.length) return { success: false, error: "未采集到可用页面，请检查 URL 或网站权限" };
   return { success: true, data: { pages, totalPages: pages.length } };
 });
-
-function applyContentSelector(html: string, selector = "") {
-  const rule = selector.trim();
-  if (!rule || !html) return html;
-  const escaped = escapeRegExp(rule.slice(1));
-  let pattern: RegExp | null = null;
-  if (rule.startsWith("#")) {
-    pattern = new RegExp(`<([a-z0-9-]+)[^>]*\\bid=["']${escaped}["'][^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
-  } else if (rule.startsWith(".")) {
-    pattern = new RegExp(`<([a-z0-9-]+)[^>]*\\bclass=["'][^"']*${escaped}[^"']*["'][^>]*>([\\s\\S]*?)<\\/\\1>`, "i");
-  } else if (/^[a-z][a-z0-9-]*$/i.test(rule)) {
-    pattern = new RegExp(`<${rule}[^>]*>([\\s\\S]*?)<\\/${rule}>`, "i");
-  }
-  const match = pattern?.exec(html);
-  return (match?.[2] || match?.[1] || html).trim();
-}
 
 // ─── Skill 3: htmlToText ────────────────────────────────
 
@@ -443,6 +419,13 @@ register("readWebPage", {
   let url: URL;
   try { url = new URL(urlStr); } catch { return { success: false, error: "URL 格式不正确" }; }
   if (!["http:", "https:"].includes(url.protocol)) return { success: false, error: "只支持 http/https 协议" };
+  // 真正出网的是 r.jina.ai（公网固定域名），但仍要拦下内网目标：
+  // 内网主机名交给第三方阅读服务本身就是一次信息泄漏。
+  try {
+    assertPublicCollectionUrl(url);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "目标地址不合法" };
+  }
   try {
     const response = await fetch(`https://r.jina.ai/${url.toString()}`, {
       headers: {
@@ -478,9 +461,22 @@ register("readWebPage", {
 
 // ─── Skill 10: searchReddit ─────────────────────────────
 
+// Reddit 的 JSON 接口（www 和 old、任何 User-Agent）从机房 IP 一律返回 403，
+// 只有 .rss 还能取到数据——它发的是 Atom，且必须带浏览器 UA，库风格的 UA 同样被挡。
+// 代价是 RSS 里没有 score / num_comments，点赞数和评论数拿不到，技能描述里也不再承诺。
+const REDDIT_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  Accept: "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+};
+
+/** 去掉 Reddit 塞在正文尾部的 "submitted by /u/x [link] [comments]" 样板。 */
+function stripRedditBoilerplate(summary: string) {
+  return summary.replace(/\s*submitted by\s*\/u\/\S+\s*\[link\]\s*\[comments\]\s*$/i, "").trim();
+}
+
 register("searchReddit", {
   name: "searchReddit",
-  description: "搜索 Reddit 社区的热门帖子、最新内容或按关键词搜索。返回帖子标题、链接、点赞数、评论数等结构化信息。",
+  description: "获取 Reddit 社区的热门帖子、最新内容或按关键词搜索，返回帖子标题、链接、作者、发布时间和正文摘要。注意：走的是 Reddit 的公开 RSS，拿不到点赞数和评论数；Reddit 对服务器 IP 限流较严，短时间连续调用可能失败。",
   parameters: {
     type: "object",
     properties: {
@@ -492,44 +488,56 @@ register("searchReddit", {
     required: ["query"],
   },
 }, async (args) => {
-  const query = String(args.query || "");
+  const query = String(args.query || "").trim();
   const mode = String(args.mode || "search");
   const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 25);
-  const subreddit = String(args.subreddit || "").trim();
+  // mode=hot/new 且没单独给 subreddit 时，query 本身就是版块名——参数说明里就是这么讲的。
+  const subreddit = String(args.subreddit || "").trim() || (mode === "hot" || mode === "new" ? query : "");
   if (!query) return { success: false, error: "请提供搜索关键词或 subreddit 名称" };
   try {
     let url: string;
-    if (mode === "hot" && subreddit) {
-      url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/hot.json?limit=${limit}`;
-    } else if (mode === "new" && subreddit) {
-      url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/new.json?limit=${limit}`;
+    if (mode === "search") {
+      url = subreddit
+        ? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.rss?q=${encodeURIComponent(query)}&restrict_sr=1&sort=relevance&limit=${limit}`
+        : `https://www.reddit.com/search.rss?q=${encodeURIComponent(query)}&sort=relevance&limit=${limit}`;
+    } else if (subreddit) {
+      url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/${mode}.rss?limit=${limit}`;
     } else {
-      url = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=${limit}&sort=${mode === "new" ? "new" : "relevance"}`;
+      url = `https://www.reddit.com/${mode}.rss?limit=${limit}`;
     }
-    const response = await fetch(url, {
-      headers: { "User-Agent": "agent-reach-integration/1.0" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (response.status === 429) return { success: false, error: "Reddit API 限流，请稍后重试" };
-    if (response.status === 403) return { success: false, error: "Reddit 访问被拒，请尝试使用其他搜索方式" };
-    if (response.status !== 200) return { success: false, error: `Reddit API 返回 ${response.status}` };
-    const data = await response.json() as { data?: { children?: Array<{ data: Record<string, unknown> }> } };
-    const posts = data?.data?.children?.slice(0, limit).map(child => {
-      const d = child.data;
+
+    const response = await fetch(url, { headers: REDDIT_HEADERS, signal: AbortSignal.timeout(15000) });
+    if (response.status === 429) return { success: false, error: "Reddit 限流（429）。它按来源 IP 限流且窗口较长，请隔一两分钟再试，或改用 searchHackerNews、searchV2EX。" };
+    if (response.status === 403) return { success: false, error: "Reddit 拒绝了本次访问（403）。该来源 IP 可能已被封禁，请改用 searchHackerNews、searchV2EX，或对具体帖子用 readWebPage。" };
+    if (response.status === 404) return { success: false, error: `未找到 subreddit "${subreddit}"，请检查版块名拼写。` };
+    if (response.status !== 200) return { success: false, error: `Reddit 返回 ${response.status}` };
+
+    const raw = await response.text();
+    const posts = parseAtomEntries(raw, limit)
+      .filter(entry => entry.title || entry.link)
+      .map(entry => ({
+        title: entry.title,
+        url: entry.link,
+        author: entry.author,
+        // <id> 形如 t3_1vfemi1，去掉 t3_ 前缀就是帖子 ID。
+        postId: entry.id.replace(/^t3_/, ""),
+        subreddit: entry.link.match(/reddit\.com\/r\/([^/]+)/i)?.[1] || subreddit,
+        created: entry.date,
+        selftext: stripRedditBoilerplate(entry.summary).slice(0, 500),
+      }));
+    if (!posts.length) {
       return {
-        title: String(d.title || ""),
-        url: `https://www.reddit.com${String(d.permalink || "")}`,
-        score: Number(d.score || 0),
-        comments: Number(d.num_comments || 0),
-        author: String(d.author || ""),
-        subreddit: String(d.subreddit || ""),
-        created: new Date(Number(d.created_utc || 0) * 1000).toISOString(),
-        selftext: String(d.selftext || "").slice(0, 500),
+        success: false,
+        error: mode === "search"
+          ? `未找到与 "${query}" 相关的 Reddit 帖子`
+          : `未取到 subreddit "${subreddit}" 的内容，请检查版块名，或确认该版块不是私有/成人内容（需要登录的版块 RSS 为空）。`,
       };
-    }) || [];
-    if (!posts.length) return { success: false, error: subreddit ? `未找到 subreddit "${subreddit}" 的内容` : `未找到与 "${query}" 相关的 Reddit 帖子` };
-    return { success: true, data: { posts, totalPosts: posts.length } };
+    }
+    return { success: true, data: { posts, totalPosts: posts.length, source: `Reddit ${mode}${subreddit ? ` · r/${subreddit}` : ""}` } };
   } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return { success: false, error: "Reddit 请求超时（15秒），请稍后重试" };
+    }
     return { success: false, error: error instanceof Error ? error.message : "Reddit 搜索失败" };
   }
 });
@@ -760,9 +768,9 @@ register("readRSS", {
   try { url = new URL(feedUrl); } catch { return { success: false, error: "URL 格式不正确" }; }
   if (!["http:", "https:"].includes(url.protocol)) return { success: false, error: "只支持 http/https 协议" };
   try {
-    const response = await fetch(feedUrl, {
+    const { response } = await safeFetch(url, {
       headers: { "User-Agent": "agent-reach-integration/1.0" },
-      signal: AbortSignal.timeout(15000),
+      timeoutMs: 15000,
     });
     if (response.status !== 200) return { success: false, error: `RSS 源返回 ${response.status}` };
     const raw = await response.text();
@@ -785,20 +793,14 @@ register("readRSS", {
         summary: htmlToText(decodeHtml(description)).slice(0, 500),
       });
     }
-    // 如果没有 <item>，尝试 <entry>（Atom）
+    // 如果没有 <item>，尝试 <entry>（Atom）——解析器与 searchReddit 共用
     if (!items.length) {
-      const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
-      while ((entryMatch = entryRegex.exec(raw)) !== null && items.length < limit) {
-        const entryXml = entryMatch[1];
-        const title = extractXmlValue(entryXml, "title");
-        const link = entryXml.match(/<link[^>]*href=["']([^"']+)["']/)?.[1] || "";
-        const date = extractXmlValue(entryXml, "published") || extractXmlValue(entryXml, "updated");
-        const summary = extractXmlValue(entryXml, "summary") || extractXmlValue(entryXml, "content");
+      for (const entry of parseAtomEntries(raw, limit)) {
         items.push({
-          title: decodeHtml(title).trim().slice(0, 200) || "无标题",
-          link: link.trim(),
-          date: date.trim(),
-          summary: htmlToText(decodeHtml(summary)).slice(0, 500),
+          title: entry.title.slice(0, 200) || "无标题",
+          link: entry.link,
+          date: entry.date,
+          summary: entry.summary.slice(0, 500),
         });
       }
     }
@@ -822,6 +824,38 @@ register("readRSS", {
 function extractXmlValue(xml: string, tag: string): string {
   const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
   return match ? match[1].trim() : "";
+}
+
+type AtomEntry = { id: string; title: string; link: string; date: string; author: string; summary: string };
+
+/** Atom 的作者是 <author><name>/u/xxx</name></author> 这种嵌套结构，直接取 name 会撞上别处的同名标签。 */
+function extractAtomAuthor(entryXml: string) {
+  const block = entryXml.match(/<author>([\s\S]*?)<\/author>/i)?.[1] || "";
+  return extractXmlValue(block, "name").replace(/^\/u\//, "").trim();
+}
+
+/**
+ * 解析 Atom 的 <entry>。
+ *
+ * readRSS 和 searchReddit 都要用：Reddit 的 .rss 实际发的就是 Atom。
+ * 只留一份实现，省得两处对 <link href> 自闭合、<content type="html"> 这些细节各理解一遍。
+ */
+function parseAtomEntries(xml: string, limit: number): AtomEntry[] {
+  const entries: AtomEntry[] = [];
+  const regex = /<entry>([\s\S]*?)<\/entry>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(xml)) !== null && entries.length < limit) {
+    const entryXml = match[1];
+    entries.push({
+      id: extractXmlValue(entryXml, "id"),
+      title: decodeHtml(extractXmlValue(entryXml, "title")).trim().slice(0, 300),
+      link: entryXml.match(/<link[^>]*href=["']([^"']+)["']/i)?.[1]?.trim() || "",
+      date: (extractXmlValue(entryXml, "published") || extractXmlValue(entryXml, "updated")).trim(),
+      author: extractAtomAuthor(entryXml),
+      summary: htmlToText(decodeHtml(extractXmlValue(entryXml, "summary") || extractXmlValue(entryXml, "content"))),
+    });
+  }
+  return entries;
 }
 
 // ─── Skill 14: searchHackerNews ─────────────────────────
