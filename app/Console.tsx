@@ -34,11 +34,28 @@ const ModelsPanel = dynamic(() => import("./features/models/ModelsPanel"), { ssr
 const ConnectorsPanel = dynamic(() => import("./features/connectors/ConnectorsPanel"), { ssr: false });
 const ProfilePanel = dynamic(() => import("./features/profile/ProfilePanel"), { ssr: false });
 const UsersPanel = dynamic(() => import("./features/users/UsersPanel"), { ssr: false });
+const SourcePasteZone = dynamic(() => import("./features/collection/SourcePasteZone"), { ssr: false });
 
 
 export default function Console({ userEmail, displayName }: { userEmail: string; displayName: string }) {
   const [tab, setTab] = useState<Tab>("chat");
   const [hydrated, setHydrated] = useState(false);
+  // 数据采集源表单：主选数据来源（sourceKind），只有「网页」才有直采/递归两种获取方式（webMethod）。
+  // 其余来源手段唯一，不显示第二个下拉，提交时自动映射 collectorMode。
+  const sourceKindMap: Record<string, string> = {
+    "网页": "direct", // 默认，webMethod 可覆盖
+    "JSON API": "api",
+    "CSV文件": "direct",
+    "图片/截图": "screenshot",
+    "文本/粘贴": "paste",
+    "MCP": "mcp",
+  };
+  const [sourceKind, setSourceKind] = useState("网页");
+  // 粘贴数据改为受控：截图识别的结果要回填进来，非受控的 defaultValue 做不到。
+  const [sampleData, setSampleData] = useState("");
+  // 这三种来源不出网，地址、请求方式、爬取范围对它们都是干扰项。
+  const isInlineSourceKind = ["图片/截图", "文本/粘贴", "MCP"].includes(sourceKind);
+  const [webMethod, setWebMethod] = useState<"direct" | "crawler">("direct");
   const [role, setRole] = useState<Role>("普通员工");
   const [appRole, setAppRole] = useState("普通员工");
   const [messages, setMessages] = useState<Message[]>([{ who: "bot", text: "你好，我是海芯博创企业助手，你上传的企业资料会进入受控知识库；所有问答均记录审计日志。" }]);
@@ -51,7 +68,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [askMode, setAskMode] = useState<"quick" | "guided" | "continuous">("quick");
   const [guide, setGuide] = useState({ role: "", task: "", context: "", constraint: "", format: "", example: "" });
-  const [continuous, setContinuous] = useState({ name: "", loopType: "目标制", reviewMode: "明确标准", goal: "", triggerType: "手动触发", reviewStandard: "", stopCondition: "", maxLoops: "3", finalAction: "提交管理员审批", failureAction: "通知负责人" });
+  const [continuous, setContinuous] = useState({ name: "", loopType: "目标制", reviewMode: "明确标准", goal: "", triggerType: "手动触发", reviewStandard: "", stopCondition: "", maxLoops: "3", finalAction: "提交管理员审批", failureAction: "通知负责人", scheduleTime: "09:00" });
   const [busy, setBusy] = useState(false);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [personalKnowledge, setPersonalKnowledge] = useState<PersonalKnowledge[]>([]);
@@ -107,6 +124,9 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const [runningSourceId, setRunningSourceId] = useState<number | null>(null);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [sourceDraft, setSourceDraft] = useState<Partial<Source> | null>(null);
+  // 「自定义采集内容」两种布局都要用，但位置不同：出网来源排在地址之后，
+  // 粘贴/截图/MCP 排在粘贴区之后（数据本身才是主输入）。抽出来避免两处 JSX 各抄一遍。
+  const extractFieldsField = <label className="wide">自定义采集内容<textarea name="extractFields" rows={3} defaultValue={(editingSource?.extractFields ?? sourceDraft?.extractFields) || ""} placeholder="直接写你要抓什么，不是选择题。例如：抓商品名称、价格、规格、库存、详情页链接。留空则保存整页正文。"/><small>采集过程和失败原因进日志；知识库只保存这里要求的真实结果，抓不到就失败，不会把采集报告当结果。支持 data.list.title 这类点号路径。</small></label>;
   const [cleaningRules, setCleaningRules] = useState<string[]>(["trim", "blank", "dedupe"]);
   const [cleanedPreview, setCleanedPreview] = useState("");
   const [showCleaning, setShowCleaning] = useState(false);
@@ -132,7 +152,6 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   // 角色规格（label/description/locked/defaultDecision）由 /api/capabilities 同包下发。
   const [permissionRoles, setPermissionRoles] = useState<PermissionRoleSpec[]>([]);
   // 业务规则：员工也允许采集 collect_data，由后端决定。
-  const [alwaysAllowCapabilities, setAlwaysAllowCapabilities] = useState<string[]>([]);
   const [permissionDrafts, setPermissionDrafts] = useState<Record<string, string>>({});
   const [permissionDirty, setPermissionDirty] = useState(false);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo | null>(null);
@@ -293,7 +312,6 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
       setCapabilityCatalog((data.capabilities || []) as PermissionCapability[]);
       setCapabilityGroups((data.groups || []) as PermissionCapabilityGroup[]);
       setPermissionRoles((data.roles || []) as PermissionRoleSpec[]);
-      setAlwaysAllowCapabilities((data.alwaysAllow || []) as string[]);
     }
   }
   async function loadProfile() {
@@ -424,8 +442,8 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
     setSaveDraft({ sourceType: "chat", title: `聊天沉淀 ${new Date().toLocaleDateString("zh-CN")}`, content: `# 聊天沉淀\n\n${body}`, config: JSON.stringify({ messages: useful }) });
   }
 
-  async function savePersonalKnowledge(title: string, content: string, sourceType: string) {
-    const response = await fetch("/api/personal-knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, sourceType, conversationId }) });
+  async function savePersonalKnowledge(title: string, content: string, sourceType: string, polish = false) {
+    const response = await fetch("/api/personal-knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content, sourceType, conversationId, polish }) });
     const data = await response.json();
     if (!response.ok) return setNotice(data.error || "保存个人知识失败");
     setNotice(data.message || "保存成功");
@@ -464,7 +482,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
       setNotice(data.message || "文件已保存到个人知识库");
     } else {
       if (!title || !content) return setNotice("请选择文件，或同时填写知识名称与知识内容");
-      await savePersonalKnowledge(title, content, "手动创建");
+      await savePersonalKnowledge(title, content, "手动创建", form.get("polish") === "1");
     }
     setShowPersonalKnowledge(false);
   }
@@ -723,6 +741,15 @@ ${content}`,
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const agentAction = submitter?.value || "enable";
+    // 数据来源表单：把新的 sourceKind 映射回后端的 collectorMode 和 sourceType。
+    // sourceType 只是展示文本，后端用 includes("万能") 判断爬虫。
+    if (modalType === "source") {
+      const kind = String(values.sourceKind || "网页");
+      const method = kind === "网页" ? String(values.webMethod || "direct") : sourceKindMap[kind] || "direct";
+      const sourceType = kind === "网页" ? (method === "crawler" ? "万能爬虫" : "公开网页") : kind;
+      values.sourceType = sourceType;
+      values.collectorMode = method;
+    }
     const response = await fetch("/api/modules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...values, type: modalType, ...(modalType==="source"&&editingSource?{id:String(editingSource.id)}:{}), ...(modalType==="workflow"?{steps:JSON.stringify(workflowNodes)}:{}), ...(modalType==="agent"?{status:agentAction==="draft"?"草稿":"已启用"}:{}) }) });
     const data = await response.json();
     if (!response.ok) return setNotice(data.error || "保存失败");
@@ -743,12 +770,47 @@ ${content}`,
     setEditingSource(source);
     setSourceDraft(null);
     setModalType("source");
+    setSampleData(source.sampleData || "");
+    // 编辑旧数据时按 collectorMode 反推 sourceKind，保证下拉正确回显。
+    const cm = source.collectorMode || "direct";
+    if (cm === "direct" || cm === "crawler") {
+      setSourceKind("网页");
+      setWebMethod(cm);
+    } else if (cm === "api") {
+      setSourceKind("JSON API");
+    } else if (cm === "screenshot") {
+      setSourceKind("图片/截图");
+    } else if (cm === "paste") {
+      setSourceKind("文本/粘贴");
+    } else if (cm === "mcp") {
+      setSourceKind("MCP");
+    } else {
+      setSourceKind("网页");
+      setWebMethod("direct");
+    }
   }
 
   function newSourceTask(preset?: Partial<Source>) {
     setEditingSource(null);
     setSourceDraft(preset || null);
     setModalType("source");
+    setSampleData(preset?.sampleData || "");
+    const cm = preset?.collectorMode || "direct";
+    if (cm === "direct" || cm === "crawler") {
+      setSourceKind("网页");
+      setWebMethod(cm);
+    } else if (cm === "api") {
+      setSourceKind("JSON API");
+    } else if (cm === "screenshot") {
+      setSourceKind("图片/截图");
+    } else if (cm === "paste") {
+      setSourceKind("文本/粘贴");
+    } else if (cm === "mcp") {
+      setSourceKind("MCP");
+    } else {
+      setSourceKind("网页");
+      setWebMethod("direct");
+    }
   }
 
   async function runModule(module: "workflow" | "source", id: number, name: string) {
@@ -932,11 +994,13 @@ ${content}`,
       type: "workflow", name: continuous.name, triggerType: continuous.triggerType, steps: "设定目标 → 执行任务 → 审查结果 → 循环评估",
       loopType: continuous.loopType, reviewMode: continuous.reviewMode, reviewStandard: continuous.reviewStandard,
       stopCondition: continuous.stopCondition, maxLoops: continuous.maxLoops, finalAction: continuous.finalAction,
-      failureAction: continuous.failureAction,
+      failureAction: continuous.failureAction, scheduleTime: continuous.loopType === "定时制" ? continuous.scheduleTime : "",
     }) });
     const data = await response.json();
     if (!response.ok) return setNotice(data.error || "持续任务创建失败");
-    setNotice("持续任务已创建，并交给自动化工作流托管");
+    setNotice(continuous.loopType === "定时制"
+      ? `持续任务已创建，每天 ${continuous.scheduleTime}（北京时间）自动运行`
+      : "持续任务已创建；该模式不会自动运行，需要在工作流中心手动触发");
     await Promise.all([loadModules(), loadState()]);
     setSaveDraft({ sourceType: "loop", title: continuous.name, content: loopMarkdown(), config: JSON.stringify(continuous) });
     setTab("workflows"); setAskMode("quick");
@@ -955,13 +1019,13 @@ ${content}`,
       if (files.length) {
         response = await fetch("/api/state", { method: "POST", body: form });
       } else {
-        response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "document", title: form.get("title"), content: form.get("content"), visibility: form.get("visibility"), departmentId: form.get("departmentId"), category: form.get("category"), tags: form.get("tags"), updateMode: form.get("updateMode"), updateSchedule: form.get("updateSchedule") }) });
+        response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "document", title: form.get("title"), content: form.get("content"), visibility: form.get("visibility"), departmentId: form.get("departmentId"), category: form.get("category"), tags: form.get("tags"), updateMode: form.get("updateMode"), updateSchedule: form.get("updateSchedule"), polish: form.get("polish") === "1" }) });
       }
       const data = await response.json();
       clearInterval(tick);
       setUploadProgress(100);
       if (!response.ok) { setUploading(false); setUploadProgress(0); return setNotice(data.error || "保存失败"); }
-      setNotice(files.length ? `已上传 ${files.length} 个文件；可解析内容已进入AI检索` : "资料已保存并可用于AI问答");
+      setNotice(files.length ? `已上传 ${files.length} 个文件；可解析内容已进入AI检索` : (data.message || "资料已保存并可用于AI问答"));
       setTimeout(() => {
         setShowUpload(false); event.currentTarget.reset();
         setUploadFiles([]); setUploadMode("file"); setUploadProgress(0); setUploading(false);
@@ -1029,7 +1093,7 @@ ${content}`,
           </div><div className="promptPreview"><b>系统将自动整理为完整提示词</b><p>{guide.task ? [guide.role,guide.task,guide.context,guide.constraint,guide.format,guide.example].filter(Boolean).join(" ｜ ") : "选择模板或填写任务后，这里会显示内容摘要。"}</p><button disabled={busy}>{busy?"正在生成…":"提交给企业助手 →"}</button></div></form> :
           <form className="continuousGuide" onSubmit={createContinuousTask}><div className="guideIntro"><div><b>创建一个会持续工作的AI任务</b><p>选择运行方式和判断标准，确认后由自动化工作流托管。</p></div></div><div className="loopCards">{[
             ["回合制","AI通过多轮询问和沟通完成","需求访谈、方案讨论"],["目标制","AI持续执行直到达到目标","整理线索、优化方案"],["定时制","按照固定时间重复执行","日报、周报、舆情监测"],["主动制","发现事件或异常后主动执行","投诉提醒、指标异常"],
-          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label><label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>确认并创建 →</button></div></form>}
+          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label>{continuous.loopType==="定时制"&&<label>每天运行时间（北京时间）<input required type="time" value={continuous.scheduleTime} onChange={e=>setContinuous({...continuous,scheduleTime:e.target.value})}/></label>}{continuous.loopType==="主动制"&&<label className="wide">说明<small style={{ display: "block", opacity: 0.75 }}>主动制暂未接入事件源，创建后不会自动运行，需要在工作流中心手动触发。</small></label>}<label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>确认并创建 →</button></div></form>}
         </section>
         <aside className={`insightPanel ${insightCollapsed?"collapsed":""}`}><div className="insightTitle"><h3>当前运行状态</h3><button type="button" onClick={()=>setInsightCollapsed(value=>!value)} title={insightCollapsed?"展开运行状态":"收起运行状态"}>{insightCollapsed?<ChevronLeftIcon style={{ width: 12, height: 12 }} />:<ChevronRightIcon style={{ width: 12, height: 12 }} />}<span>{insightCollapsed?"展开":"收起"}</span></button></div>{!insightCollapsed&&<><div className="controlCard"><span>身份权限</span><b>{role}</b></div><div className="controlCard"><span>企业资料</span><b>{docs.length} 份</b></div><div className="controlCard"><span>审计记录</span><b>{logs.length} 条</b></div><button className="viewAudit" onClick={() => setTab("logs")}>查看审计记录 →</button></>}</aside>
       </div>}
@@ -1107,7 +1171,7 @@ ${content}`,
 
       {tab === "approvals" && <ApprovalsPanel approvals={approvals} appRole={appRole} userEmail={userEmail} orgOwner={orgOwner} setShowApproval={setShowApproval} setNotice={setNotice} loadGovernance={loadGovernance} loadState={loadState} />}
 
-      {tab === "permissions" && <PermissionsPanel permissions={permissions} permissionDrafts={permissionDrafts} setPermissionDrafts={setPermissionDrafts} permissionDirty={permissionDirty} setPermissionDirty={setPermissionDirty} setNotice={setNotice} loadGovernance={loadGovernance} loadState={loadState} capabilityCatalog={capabilityCatalog} capabilityGroups={capabilityGroups} permissionRoles={permissionRoles} alwaysAllowCapabilities={alwaysAllowCapabilities} />}
+      {tab === "permissions" && <PermissionsPanel permissions={permissions} permissionDrafts={permissionDrafts} setPermissionDrafts={setPermissionDrafts} permissionDirty={permissionDirty} setPermissionDirty={setPermissionDirty} setNotice={setNotice} loadGovernance={loadGovernance} loadState={loadState} capabilityCatalog={capabilityCatalog} capabilityGroups={capabilityGroups} permissionRoles={permissionRoles} />}
 
       {tab === "logs" && <AuditLogsPanel logs={logs} setLogs={setLogs} selectedLogIds={selectedLogIds} setSelectedLogIds={setSelectedLogIds} setNotice={setNotice} loadState={loadState} />}
 
@@ -1142,6 +1206,7 @@ ${content}`,
         </>) : (<div className="textModePanel">
           <label>资料名称<input name="title" placeholder="例如：2026 产品介绍" disabled={uploading}/></label>
           <label>资料内容<textarea name="content" rows={8} placeholder="在这里粘贴正文内容…" disabled={uploading}/></label>
+          <label className="polishToggle"><input type="checkbox" name="polish" value="1" disabled={uploading}/>让 AI 整理格式后再保存<small>不勾选则原文保存，一个字都不改。勾选后由 AI 整理成结构清晰的 Markdown，只调整排版、保留原始事实；整理不成功会自动按原文保存。</small></label>
         </div>)}
         {uploading && (<div className="uploadProgressBox"><div className="uploadProgressBar" style={{ width: uploadProgress + "%" }} /><small>{uploadProgress < 100 ? "正在上传…" : "处理中…"} {Math.round(uploadProgress)}%</small></div>)}
       </div>
@@ -1169,7 +1234,7 @@ ${content}`,
     </div>
     <div className="modalActions"><button type="button" className="outline" disabled={uploading} onClick={() => { setShowUpload(false); setUploadFiles([]); setUploadMode("file"); }}>取消</button><button type="submit" disabled={uploading}>{uploading ? "上传中…" : uploadMode==="file" ? "上传并进入知识库" : "创建知识"}</button></div></form></div>}
     {viewingKnowledge && <div className="modalBackdrop" onMouseDown={()=>setViewingKnowledge(null)}><div className="modal knowledgeViewer" onMouseDown={e=>e.stopPropagation()}><div className="modalHead"><div><h2>{viewingKnowledge.title}</h2><p>{viewingKnowledge.meta}</p></div><button type="button" onClick={()=>setViewingKnowledge(null)}>×</button></div><pre>{viewingKnowledge.content}</pre><div className="modalActions"><button type="button" className="outline" onClick={()=>setViewingKnowledge(null)}>关闭</button><button type="button" onClick={()=>downloadKnowledgeText(viewingKnowledge.downloadName,viewingKnowledge.content)}>下载文件</button></div></div></div>}
-    {showPersonalKnowledge && <div className="modalBackdrop" onMouseDown={()=>setShowPersonalKnowledge(false)}><form className="modal knowledgeUpload" onSubmit={createPersonalKnowledge} onMouseDown={e=>e.stopPropagation()}><div className="modalHead"><div><h2>新建个人知识</h2><p>可批量上传 PDF、Word、Excel、PPT、Markdown、Skill 等文件，也可以直接粘贴正文内容。</p></div><button type="button" onClick={()=>setShowPersonalKnowledge(false)}>×</button></div><label className="fileDrop"><input name="files" type="file" multiple accept=".md,.markdown,.skill,.txt,.csv,.json,.xml,.html,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.gif"/><b>选择或拖入文件</b><span>PDF、Word、Excel、PPT、MD、Skill、CSV、TXT 及常见图片 · 单个不超过30MB</span></label><div className="uploadDivider"><span>或者直接创建一份个人知识</span></div><label>知识名称<input name="title" placeholder="未选择文件时填写，例如：客户跟进要点"/></label><label>知识内容<textarea name="content" rows={10} placeholder="未选择文件时，在这里粘贴正文…"/></label><div className="modalActions"><button type="button" className="outline" onClick={()=>setShowPersonalKnowledge(false)}>取消</button><button type="submit">保存个人知识</button></div></form></div>}
+    {showPersonalKnowledge && <div className="modalBackdrop" onMouseDown={()=>setShowPersonalKnowledge(false)}><form className="modal knowledgeUpload" onSubmit={createPersonalKnowledge} onMouseDown={e=>e.stopPropagation()}><div className="modalHead"><div><h2>新建个人知识</h2><p>可批量上传 PDF、Word、Excel、PPT、Markdown、Skill 等文件，也可以直接粘贴正文内容。</p></div><button type="button" onClick={()=>setShowPersonalKnowledge(false)}>×</button></div><label className="fileDrop"><input name="files" type="file" multiple accept=".md,.markdown,.skill,.txt,.csv,.json,.xml,.html,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.gif"/><b>选择或拖入文件</b><span>PDF、Word、Excel、PPT、MD、Skill、CSV、TXT 及常见图片 · 单个不超过30MB</span></label><div className="uploadDivider"><span>或者直接创建一份个人知识</span></div><label>知识名称<input name="title" placeholder="未选择文件时填写，例如：客户跟进要点"/></label><label>知识内容<textarea name="content" rows={10} placeholder="未选择文件时，在这里粘贴正文…"/></label><label className="polishToggle"><input type="checkbox" name="polish" value="1"/>让 AI 整理格式后再保存<small>不勾选则原文保存，一个字都不改。勾选后由 AI 整理成结构清晰的 Markdown，只调整排版、保留原始事实；整理不成功会自动按原文保存。</small></label><div className="modalActions"><button type="button" className="outline" onClick={()=>setShowPersonalKnowledge(false)}>取消</button><button type="submit">保存个人知识</button></div></form></div>}
             {modalType && <div className="modalBackdrop" onMouseDown={closeModuleModal}><form className={`modal ${modalType==="source"?"sourceBuilder":modalType==="agent"?"agentBuilderModal":""}`} onSubmit={saveModule} onMouseDown={e=>e.stopPropagation()}><div className="modalHead"><div><h2>{modalType==="agent"?"创建智能体":modalType==="workflow"?"新建工作流":editingSource?"编辑采集任务":"新建采集任务"}</h2><p>{modalType==="source"?"一次配置后可测试、立即运行，并由采集用户直接确认进入知识库。":modalType==="agent"?"配置模型、提示词、知识、能力和运行规则，保存后直接试聊。":"保存后立即进入企业后台统一管理。"}</p></div><button type="button" onClick={closeModuleModal}>×</button></div>
       <label>名称<input name="name" required defaultValue={modalType==="source" ? (editingSource?.name ?? sourceDraft?.name) || "" : ""} placeholder={modalType==="agent"?"例如：企业宣传助手":modalType==="workflow"?"例如：客户线索整理":"例如：官网公开信息"}/></label>
       {modalType==="agent" && <div className="agentBuilder">
@@ -1185,15 +1250,40 @@ ${content}`,
         <div className="builderSection">
           <b>1. 数据从哪里来</b>
           <div className="sourceConfigGrid">
-            <label>数据类型<select name="sourceType" defaultValue={(editingSource?.sourceType ?? sourceDraft?.sourceType) || "公开网页"}><option>公开网页</option><option>万能爬虫</option><option>JSON API</option><option>CSV文件地址</option><option>粘贴CSV/JSON</option><option>截图识别/图片数据</option><option>MCP返回数据</option></select></label>
-            <label>采集方式<select name="collectorMode" defaultValue={(editingSource?.collectorMode ?? sourceDraft?.collectorMode) || "direct"}><option value="direct">网页直采</option><option value="crawler">万能爬虫</option><option value="api">API采集</option><option value="mcp">MCP采集</option><option value="screenshot">图片/截图识别</option><option value="paste">手动粘贴</option></select></label>
-            <label>请求方式<select name="requestMethod" defaultValue={(editingSource?.requestMethod ?? sourceDraft?.requestMethod) || "GET"}><option>GET</option><option>POST</option></select></label>
-            <label className="wide">HTTPS地址<input name="sourceUrl" type="url" defaultValue={(editingSource?.sourceUrl ?? sourceDraft?.sourceUrl) || ""} placeholder="网页/API/CSV地址；截图、MCP、粘贴数据可不填"/></label>
-            <label className="wide">自定义采集内容<textarea name="extractFields" rows={3} defaultValue={(editingSource?.extractFields ?? sourceDraft?.extractFields) || ""} placeholder="直接写你要抓什么，不是选择题。例如：抓商品名称、价格、规格、库存、详情页链接。留空则保存整页正文。"/><small>采集过程和失败原因进日志；知识库只保存这里要求的真实结果，抓不到就失败，不会把采集报告当结果。</small></label>
-            <label className="wide">粘贴数据 / 截图识别文字 / MCP返回结果<textarea name="sampleData" rows={6} defaultValue={(editingSource?.sampleData ?? sourceDraft?.sampleData) || ""} placeholder={"截图采集：粘贴图片识别后的文字或表格，系统只保存数据，不保存图片原件。\nCSV示例：name,amount,date\n客户A,12000,2026-07-24"}/><small>万能爬虫会尽量抓取网页正文；遇到登录、403、验证码或反爬，需要改用授权API、MCP、代理或手动粘贴结果。</small></label>
+            <label>数据来源<select name="sourceKind" value={sourceKind} onChange={event=>setSourceKind(event.target.value)}>
+              <option value="网页">网页</option>
+              <option value="JSON API">JSON API</option>
+              <option value="CSV文件">CSV文件</option>
+              <option value="图片/截图">图片/截图</option>
+              <option value="文本/粘贴">文本/粘贴</option>
+              <option value="MCP">MCP</option>
+            </select><small>主选数据来源类型</small></label>
+            {sourceKind === "网页" && <label>采集方式<select name="webMethod" value={webMethod} onChange={event=>setWebMethod(event.target.value as "direct"|"crawler")}>
+              <option value="direct">直采单页</option>
+              <option value="crawler">递归爬取</option>
+            </select><small>直采只抓当前页；递归会按深度和页数爬取链接</small></label>}
+            {/* 粘贴/截图/MCP 三种来源不出网，地址与请求方式对它们只是干扰项 */}
+            {!isInlineSourceKind && <>
+              <label>请求方式<select name="requestMethod" defaultValue={(editingSource?.requestMethod ?? sourceDraft?.requestMethod) || "GET"}><option>GET</option><option>POST</option></select></label>
+              <label className="wide">HTTPS地址<input name="sourceUrl" type="url" defaultValue={(editingSource?.sourceUrl ?? sourceDraft?.sourceUrl) || ""} placeholder="网页/API/CSV文件的完整地址，例如 https://example.com/data.csv"/></label>
+              <label className="wide">请求头（可选）<textarea name="requestHeaders" rows={3} placeholder={"每行一个，格式 Key: Value\nAuthorization: Bearer 你的令牌\nX-Api-Key: 你的密钥"}/><small>{editingSource?.requestHeaderNames?.length ? `已配置：${editingSource.requestHeaderNames.join("、")}（值不回显，留空即保持不变）` : "企业自有 API 需要鉴权时填写；值加密保存且不会回显。头名与头值都只能用 ASCII。"}</small></label>
+              {extractFieldsField}
+            </>}
           </div>
+          {isInlineSourceKind
+            ? <>
+                {/* 平台下拉随爬取范围一起隐藏了，这里按数据来源补一个固定值，避免粘贴任务被记成"公开网站" */}
+                <input type="hidden" name="platform" value={sourceKind === "图片/截图" ? "screenshot" : sourceKind === "MCP" ? "mcp" : "manual_export"} />
+                {/* 这三种来源里，"数据本身"才是主输入，必须排在"要抓哪些字段"前面 */}
+                <SourcePasteZone value={sampleData} onChange={setSampleData} kind={sourceKind} taskName={editingSource?.name} modelMode={editingSource?.modelMode} setNotice={setNotice} />
+                <div className="sourceConfigGrid" style={{ marginTop: 10 }}>{extractFieldsField}</div>
+              </>
+            : <details className="sourceSampleFold">
+                <summary>补充样例数据（可选）</summary>
+                <SourcePasteZone value={sampleData} onChange={setSampleData} kind={sourceKind} taskName={editingSource?.name} modelMode={editingSource?.modelMode} setNotice={setNotice} />
+              </details>}
         </div>
-        <div className="builderSection">
+        {!isInlineSourceKind && <div className="builderSection">
           <b>2. 爬取范围与平台设置</b>
           <div className="sourceConfigGrid">
             <label>平台<select name="platform" defaultValue={(editingSource?.platform ?? sourceDraft?.platform) || "web"}><option value="web">公开网站</option><option value="xiaohongshu">小红书（授权数据）</option><option value="douyin">抖音（授权数据）</option><option value="kuaishou">快手（授权数据）</option><option value="bilibili">B站（授权数据）</option><option value="wechat">公众号/视频号（授权数据）</option><option value="zhihu">知乎（授权数据）</option><option value="custom_api">企业自有API</option><option value="mcp">MCP工具返回</option><option value="screenshot">截图/图片识别</option><option value="manual_export">平台导出文件</option></select></label>
@@ -1206,16 +1296,16 @@ ${content}`,
             <label>合规规则<select name="respectRobots" defaultValue={(editingSource?.respectRobots ?? sourceDraft?.respectRobots) || "yes"}><option value="yes">遵守站点规则</option><option value="no">仅企业授权来源</option></select></label>
           </div>
           <p className="builderHint">平台类采集必须走合法授权/API/MCP/导出数据，系统不会绕过登录、验证码、付费墙或反爬限制；公开网站会按同域链接、深度和页数真实递归抓取。</p>
-        </div>
+        </div>}
         <div className="builderSection">
-          <b>2. 什么时候运行</b>
+          <b>3. 什么时候运行</b>
           <div className="sourceConfigGrid">
             <label>运行计划<select name="schedule" defaultValue={(editingSource?.schedule ?? sourceDraft?.schedule) || "手动"}><option>手动</option><option>每天 09:00</option><option>每周一 09:00</option><option>每月1日 09:00</option></select></label>
             <label>入库方式<select name="publishMode" defaultValue={["record_only","仅保存采集记录"].includes(String(editingSource?.publishMode ?? sourceDraft?.publishMode ?? "")) ? "record_only" : "auto"}><option value="auto">自动入库</option><option value="record_only">仅保存采集记录</option></select><small>默认成功后直接进入上面选择的知识库；选择“仅保存采集记录”时只保留日志和预览。</small></label>
           </div>
         </div>
         <div className="builderSection">
-          <b>3. 采集结果放到哪里</b>
+          <b>4. 采集结果放到哪里</b>
           <div className="sourceConfigGrid">
             <label>默认入库<select name="targetStore" defaultValue={(editingSource?.targetStore ?? sourceDraft?.targetStore) || "personal"}><option value="personal">个人知识库（推荐）</option><option value="enterprise">企业知识库</option><option value="both">个人 + 企业</option></select><small>个人知识不会自动共享；需要共享时，再到企业知识页手动同步。</small></label>
             <label>输出形态<select name="outputFormat" defaultValue={(editingSource?.outputFormat ?? sourceDraft?.outputFormat) || "markdown"}><option value="markdown">Markdown</option><option value="document">文档</option><option value="table">表格</option><option value="json">JSON</option><option value="raw">原始文本</option></select></label>
@@ -1224,7 +1314,7 @@ ${content}`,
           </div>
         </div>
         <div className="builderSection">
-          <b>4. 模型整理</b>
+          <b>5. 模型整理</b>
           <div className="sourceConfigGrid">
             <label className="wide">采集整理模型<select name="modelMode" defaultValue={(editingSource?.modelMode ?? sourceDraft?.modelMode) || "auto"}>{modelModeOptions}</select><small>用于把网页/API/MCP/截图识别文本整理成可入库内容；只想保留原始抓取内容时，选择“不调用模型”。</small></label>
           </div>

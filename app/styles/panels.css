@@ -249,6 +249,157 @@
 .sourceConfigGrid label {
   margin: 0;
 }
+/* 采集任务的粘贴区：选到粘贴/截图/MCP 时它就是主入口，必须一眼看见 */
+.sourcePasteZone {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px dashed #c3d8ce;
+  border-radius: 10px;
+  background: #fff;
+}
+.sourcePasteZone.primary {
+  border: 2px dashed var(--green);
+  background: #f6fcf9;
+}
+.sourcePasteZone.dragging {
+  border-color: var(--green);
+  background: #eef8f3;
+}
+.sourcePasteHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.sourcePasteHead b {
+  display: block;
+  font-size: 12px;
+}
+.sourcePasteHead small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.sourcePasteMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.sourcePasteMeta span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.sourcePasteMeta button {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+}
+.sourcePasteZone textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.sourcePasteFoot {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.screenshotDrop {
+  margin-bottom: 8px;
+  padding: 10px;
+  border: 1px dashed #c3d8ce;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+.screenshotDrop > p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+.screenshotThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.screenshotThumbs figure {
+  position: relative;
+  width: 96px;
+  margin: 0;
+}
+.screenshotThumbs img {
+  width: 96px;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  object-fit: cover;
+}
+.screenshotThumbs button {
+  width: 100%;
+  margin-top: 3px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 9px;
+  cursor: pointer;
+}
+.screenshotActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.screenshotActions button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.screenshotActions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.screenshotPick {
+  position: relative;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.screenshotPick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.sourceSampleFold {
+  margin-top: 10px;
+}
+.sourceSampleFold > summary {
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
 .collectionResult {
   width: min(720px, calc(100vw - 30px));
 }
@@ -2021,10 +2172,92 @@
 }
 .orgChartSection .orgChartCard {
   cursor: default;
+  /* 卡片内要装下成员清单，比"只有部门名"的紧凑卡片宽一些 */
+  width: 320px;
+  grid-template-columns: 34px minmax(180px, 1fr) auto;
 }
 .orgChartSection .orgChartCard:hover {
   border-color: #d6e5de;
   box-shadow: 0 5px 16px rgba(36, 66, 54, 0.08);
+}
+.orgChartSection .orgNodeBody p {
+  word-break: break-all;
+}
+/* 成员清单是卡片内容，不是架构树的一层。
+   必须显式覆盖 .orgChartRoot ul/li 的 flex 布局与连线伪元素，
+   否则成员会被当成树节点横向排开，并各自挂上一截连接线。 */
+.orgChartRoot .orgChartMembers {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed #d6e5de;
+  list-style: none;
+  text-align: left;
+}
+.orgChartRoot .orgChartMembers:before,
+.orgChartRoot .orgChartMembers > li:before,
+.orgChartRoot .orgChartMembers > li:after {
+  content: none;
+  display: none;
+}
+.orgChartRoot .orgChartMembers > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 0;
+  text-align: left;
+}
+.orgChartMembers > li.leftMember {
+  opacity: 0.55;
+}
+.orgChartMembers b {
+  font-size: 10px;
+  font-weight: 700;
+}
+.orgChartMembers span {
+  color: var(--muted);
+  font-size: 9px;
+  word-break: break-all;
+}
+.orgChartMembers small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 8px;
+}
+.orgChartMembers .memberBadge {
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #edf5f1;
+  color: var(--green);
+  font-size: 8px;
+  font-style: normal;
+  white-space: nowrap;
+}
+.orgChartMembers .memberBadge.owner {
+  background: #fff1d8;
+  color: #8b620d;
+}
+.orgChartRoot .orgChartMoreMembers {
+  justify-content: flex-start;
+}
+.orgChartMoreMembers button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.orgChartEmptyMembers {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed #d6e5de;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: left;
 }
 .memberChips em {
   font-style: normal;

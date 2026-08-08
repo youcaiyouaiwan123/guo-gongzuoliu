@@ -35,7 +35,7 @@
   display: grid;
   flex: 0 0 auto;
   min-width: 0;
-  grid-template-columns: 1fr 44px;
+  grid-template-columns: 1fr auto 44px;
   align-items: end;
   gap: 8px;
   background: #ffffff;
@@ -84,6 +84,22 @@
   opacity: 0.4;
   cursor: not-allowed;
   box-shadow: none;
+  transform: none;
+}
+/* 快速清空按钮：覆盖上面的圆形发送键样式，做成低调的次要按钮 */
+.composer > button.composerClear {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid #e5d2cf;
+  color: #9a4c42;
+  box-shadow: none;
+  align-self: center;
+}
+.composer > button.composerClear:hover:not(:disabled) {
+  background: #fdecea;
+  border-color: #c98c84;
   transform: none;
 }
 .composer small {
@@ -454,6 +470,12 @@
 }
 .uploadLeftPanel .fileDrop:focus-visible {
   box-shadow: 0 0 0 3px rgba(8, 118, 90, 0.18);
+}
+.uploadLeftPanel .fileDrop.dragActive {
+  border-color: #08765a;
+  border-style: solid;
+  background: #e6f3ed;
+  box-shadow: 0 0 0 3px rgba(8, 118, 90, 0.22);
 }
 .uploadLeftPanel > input[type="file"] {
   display: none;
@@ -861,6 +883,11 @@
   text-align: center;
   cursor: pointer;
 }
+.fileDrop.dragActive {
+  border: 1px solid var(--green) !important;
+  background: #d9ede4;
+  box-shadow: 0 0 0 3px rgba(8, 118, 90, 0.20);
+}
 .fileDrop input {
   width: auto !important;
   border: 0 !important;
@@ -874,6 +901,27 @@
   color: var(--muted);
   font-size: 9px;
 }
+/* 「让 AI 整理格式后再保存」开关：把"原文保存还是被改写"这个区别摆到明面上，
+   它决定了存进知识库的到底是不是用户贴进来的那段字。 */
+.polishToggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 11px;
+}
+.polishToggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+.polishToggle small {
+  grid-column: 2;
+  color: #8b9791;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .uploadDivider {
   display: flex;
   align-items: center;

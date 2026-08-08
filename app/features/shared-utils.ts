@@ -37,7 +37,7 @@ export function outputFormatLabel(value?: string) {
 }
 
 export function collectorModeLabel(value?: string) {
-  return ({ direct: "网页直采", api: "API采集", crawler: "万能爬虫", mcp: "MCP采集", screenshot: "图片/截图识别", paste: "手动粘贴" } as Record<string, string>)[value || "direct"] || "网页直采";
+  return ({ direct: "网页直采", api: "API采集", crawler: "万能爬虫", mcp: "MCP采集", screenshot: "图片/截图识别", paste: "手动粘贴", ai: "AI 智能采集" } as Record<string, string>)[value || "direct"] || "网页直采";
 }
 
 export function platformLabel(value?: string) {

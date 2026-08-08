@@ -1034,6 +1034,16 @@ header {
   margin-top: 8px;
   font-size: 22px;
 }
+.cleaningSummary {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fbfdfb;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .chartBars,
 .rankBars {
   display: grid;
