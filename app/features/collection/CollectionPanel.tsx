@@ -61,7 +61,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiUrl, setAiUrl] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
-  const [aiResult, setAiResult] = useState<{ text: string; toolCalls: number } | null>(null);
+  const [aiResult, setAiResult] = useState<{ text: string; toolCalls: number; runId?: number } | null>(null);
 
   const pendingCount = collectionRuns.filter(run => ["失败", "采集失败", "待确认", "待审核", "已采集"].includes(run.status)).length;
 
@@ -93,30 +93,75 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
     setCleaningRules(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   }
 
+  // 各类空白字符：半角空格、制表符、全角空格(U+3000)、不换行空格(U+00A0)、零宽空格等。
+  // 网页和 Excel 导出的数据里全角空格和 &nbsp; 极常见，单用 trim() 清不掉。
+  const WHITESPACE = "[ \\t\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]";
+
   function runDataCleaning(sourceText?: string) {
     let text = sourceText ?? selectedCollectionRun?.preview ?? "";
     if (!text) return setNotice("请先选择一条有内容的采集记录");
+    // 顺序：清标签 → 格式标准化 → 去空格 → 删空行 → 去重 → 脱敏。
+    // 标准化必须在去重之前，否则「只差一个全角逗号」的重复行标准化后才相同，去重会漏；
+    // 去空格必须在清标签之后，因为标签被替换成空格会制造连续空白。
     if (cleaningRules.includes("html")) {
-      text = text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ");
+      text = text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, "\"");
     }
-    let lines = text.replace(/\r\n?/g, "\n").split("\n");
-    if (cleaningRules.includes("trim")) lines = lines.map(line => line.trim().replace(/[ \t]{2,}/g, " "));
-    if (cleaningRules.includes("blank")) lines = lines.filter(line => line.trim() && !/^(null|undefined|n\/a|无)$/i.test(line.trim()));
-    if (cleaningRules.includes("dedupe")) lines = Array.from(new Set(lines));
-    text = lines.join("\n");
     if (cleaningRules.includes("format")) {
       text = text.replace(/[，；：]/g, mark => ({ "，": ",", "；": ";", "：": ":" }[mark] || mark))
-        .replace(/(\d{4})[/.年](\d{1,2})[/.月](\d{1,2})日?/g, (_, y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+        .replace(/(\d{4})[/.年-](\d{1,2})[/.月-](\d{1,2})日?/g, (_, y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
     }
-    if (cleaningRules.includes("mask")) {
-      text = text
-        .replace(/(?<!\d)(1\d{2})\d{4}(\d{4})(?!\d)/g, "$1****$2")
-        .replace(/(?<!\d)(\d{6})\d{8}(\d{3}[0-9Xx])(?!\d)/g, "$1********$2")
-        .replace(/([\w.+-]{2})[\w.+-]*(@[\w.-]+\.[A-Za-z]{2,})/g, "$1***$2");
+    let lines = text.replace(/\r\n?/g, "\n").split("\n");
+    if (cleaningRules.includes("trim")) {
+      const edge = new RegExp(`^${WHITESPACE}+|${WHITESPACE}+$`, "g");
+      const inner = new RegExp(`${WHITESPACE}{2,}`, "g");
+      lines = lines.map(line => line.replace(edge, "").replace(inner, " "));
     }
+    if (cleaningRules.includes("blank")) {
+      const blank = new RegExp(`^${WHITESPACE}*$`);
+      lines = lines.filter(line => !blank.test(line) && !/^(null|undefined|n\/a|nan|无|-)$/i.test(line.trim()));
+    }
+    if (cleaningRules.includes("dedupe")) {
+      // 按去空白、手机号分隔符归一化后的内容判重，保留首次出现的原始行。
+      // 138-1234-5678 与 13812345678 是同一手机号的两种写法，脱敏前必须视为重复。
+      // 正则只匹配 1[3-9] 开头的 3-4-4 手机号形态，不会误伤 2024-03-07 这类日期。
+      const seen = new Set<string>();
+      lines = lines.filter(line => {
+        const key = line
+          .replace(new RegExp(WHITESPACE, "g"), "")
+          .replace(/(1[3-9]\d)[-](\d{4})[-](\d{4})/g, "$1$2$3")
+          .toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    text = lines.join("\n");
+    if (cleaningRules.includes("mask")) text = maskSensitive(text);
     setCleanedPreview(text);
     setShowCleaning(true);
     setNotice(`数据清洗完成：已执行 ${cleaningRules.length} 项规则，可对照预览后再入库`);
+  }
+
+  // 手机号脱敏：覆盖纯 11 位、带 -/空格分隔、带 +86/86 前缀等写法。
+  function maskSensitive(input: string) {
+    let text = input
+      // +86 / 86 前缀（可带分隔符），保留前缀
+      .replace(/(\+?86[-\s]?)(1[3-9]\d)[-\s]?(\d{4})[-\s]?(\d{4})(?!\d)/g, (_, p, a, __, d) => `${p}${a}****${d}`)
+      // 带分隔符的 11 位：138-1234-5678 / 138 1234 5678
+      .replace(/(?<![\d+])(1[3-9]\d)[-\s](\d{4})[-\s](\d{4})(?!\d)/g, "$1****$3")
+      // 纯 11 位，允许前后紧贴非数字字符（逗号、竖线、中文等）
+      .replace(/(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g, "$1****$2");
+    text = text
+      // 身份证 18 位（含末位 X）与 15 位旧号
+      .replace(/(?<![\dXx])(\d{6})\d{8}(\d{3}[\dXx])(?![\dXx])/g, "$1********$2")
+      .replace(/(?<!\d)(\d{6})\d{6}(\d{3})(?!\d)/g, "$1******$2")
+      // 邮箱：保留前 2 位与完整域名
+      .replace(/([\w.+-]{1,2})[\w.+-]*(@[\w.-]+\.[A-Za-z]{2,})/g, "$1***$2")
+      // 银行卡 16-19 位，保留前 4 后 4
+      .replace(/(?<!\d)(\d{4})\d{8,11}(\d{4})(?!\d)/g, "$1********$2");
+    return text;
   }
 
   async function readLocalCleaningFile(file?: File) {
@@ -190,8 +235,10 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "AI 采集失败");
-      setAiResult({ text: data.text, toolCalls: data.toolCalls });
-      setNotice(`AI 采集完成：调用 ${data.toolCalls} 次工具`);
+      setAiResult({ text: data.text, toolCalls: data.toolCalls, runId: data.runId });
+      setNotice(`AI 采集完成：调用 ${data.toolCalls} 次工具，已存为采集记录 #${data.runId}，请在“数据清洗与运行记录”里确认入库。`);
+      // 结果已经落库，刷新列表让这条记录立刻出现在运行记录里，用户不用手动刷新页面。
+      await loadModules();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "AI 采集失败");
     } finally {
@@ -457,7 +504,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
             <div className="aiCollectResult">
               <div className="aiCollectResultHead">
                 <b>采集结果</b>
-                <small>调用 {aiResult.toolCalls} 次工具</small>
+                <small>调用 {aiResult.toolCalls} 次工具{aiResult.runId ? ` · 采集记录 #${aiResult.runId} 待确认入库` : ""}</small>
               </div>
               <pre>{aiResult.text.slice(0, 20000)}</pre>
             </div>

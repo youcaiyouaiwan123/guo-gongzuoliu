@@ -65,6 +65,14 @@ async function ensureSchema() {
   await ensureColumn(runtime.DB, "data_source_details", "include_comments", "TEXT NOT NULL DEFAULT 'no'");
   await ensureColumn(runtime.DB, "data_source_details", "export_profile", "TEXT NOT NULL DEFAULT 'knowledge'");
   await ensureColumn(runtime.DB, "data_source_details", "respect_robots", "TEXT NOT NULL DEFAULT 'yes'");
+  // 企业自有 API 基本都要带鉴权头，按"每行 Key: Value"保存。
+  await ensureColumn(runtime.DB, "data_source_details", "request_headers", "TEXT NOT NULL DEFAULT ''");
+  // 定时任务调度：created_by 决定到点用谁的身份跑，enabled 与 status 分开是因为
+  // status 跑完会变成"已完成"，没法再拿来判断该不该继续调度。详见 drizzle/0023。
+  await ensureColumn(runtime.DB, "workflows", "created_by", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "schedule_time", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "next_run_at", "TEXT");
+  await ensureColumn(runtime.DB, "workflows", "enabled", "INTEGER NOT NULL DEFAULT 0");
 }
 
 async function getModel(email: string, mode = "auto") {
@@ -92,6 +100,32 @@ async function askModel(email: string, instruction: string, content: string, mod
       { role: "user", content: `${instruction}\n\n待处理内容：\n${content}` },
     ], { temperature: 0.2 });
   return result.trim() || "模型未返回内容";
+}
+
+/**
+ * 截图识别：把图片交给视觉模型，只要求原样转录，不做归纳。
+ *
+ * 采集任务此前只能手工粘贴 OCR 后的文字，用户拿着截图无处可放。
+ * 提示词强调"只输出图里真实存在的内容"，避免模型把看不清的数字补全成"合理"的数字——
+ * 采集数据一旦被编造，后面的清洗和入库都会把错误当事实沉淀下去。
+ */
+async function askModelWithImages(email: string, instruction: string, imageDataUrls: string[], mode = "auto") {
+  const model = await getModel(email, mode);
+  if (!model) throw new Error("尚未配置模型API，请先到“模型接入”填写自己的API");
+  const result = await callModel(model, [
+    {
+      role: "system",
+      content: "你是严谨的图片转文字助手。只输出图片中真实存在的文字与表格内容，逐字转录，不补全、不推测、不解释、不加任何说明。看不清的字符用 ? 代替。图中是表格时输出 Markdown 表格；不是表格时按原始分行输出纯文本；图中没有可读内容时只输出空字符串。",
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text" as const, text: instruction },
+        ...imageDataUrls.map(url => ({ type: "image_url" as const, image_url: { url } })),
+      ],
+    },
+  ], { temperature: 0, maxTokens: 3200 });
+  return result.trim();
 }
 
 async function audit(actor: string, action: string, resource: string, result: string, detail: string) {
@@ -129,5 +163,5 @@ async function askModelWithSkills(
   return { text: result.text, toolCalls: result.toolCalls };
 }
 
-export { runtime, ensureSchema, askModel, askModelWithSkills, audit };
+export { runtime, ensureSchema, askModel, askModelWithImages, askModelWithSkills, audit };
 export type { RuntimeEnv, NodeType, WorkflowNode, WorkflowRow, WorkflowRunOptions };
