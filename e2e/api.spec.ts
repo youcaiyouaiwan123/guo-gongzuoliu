@@ -1,16 +1,21 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+// 管理员凭据取自 .env（由 playwright.config.ts 读入 process.env）。
+// 写死密码会让 e2e 只能在某一套本地数据上跑通，换环境就是一片 401。
+const ADMIN_USERNAME = process.env.DEFAULT_ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "admin123456";
 
 // 管理员登录辅助函数
-async function loginAsAdmin(page: any) {
+async function loginAsAdmin(page: Page) {
   const loginRes = await page.request.post("/api/auth/login", {
-    data: { email: "admin", password: "admin123456", adminOnly: true },
+    data: { email: ADMIN_USERNAME, password: ADMIN_PASSWORD, adminOnly: true },
   });
-  expect(loginRes.status()).toBe(200);
+  expect(loginRes.status(), "管理员登录失败：请确认 .env 里的 DEFAULT_ADMIN_USERNAME / DEFAULT_ADMIN_PASSWORD 与被测服务一致").toBe(200);
   return loginRes;
 }
 
 // 验证 GET 返回 200 且包含指定属性
-async function expectGetOk(page: any, url: string, ...props: string[]) {
+async function expectGetOk(page: Page, url: string, ...props: string[]) {
   const res = await page.request.get(url);
   expect(res.status()).toBe(200);
   const body = await res.json();
@@ -21,7 +26,7 @@ async function expectGetOk(page: any, url: string, ...props: string[]) {
 }
 
 // 验证 POST 返回 400 且包含 error 属性
-async function expectPost400(page: any, url: string, data: any) {
+async function expectPost400(page: Page, url: string, data: Record<string, unknown>) {
   const res = await page.request.post(url, { data });
   expect(res.status()).toBe(400);
   const body = await res.json();
@@ -88,6 +93,83 @@ test.describe("核心功能", () => {
 });
 
 // ============================================================
+// 组织架构：部门与员工
+// ============================================================
+// 用例之间有先后依赖（建部门 → 分配 → 移出），声明为串行执行。
+test.describe.serial("组织架构员工管理", () => {
+  // 用例自带清理，避免在开发库里留下测试部门。名称带随机后缀，重复执行不会互相冲突。
+  const suffix = `${Date.now()}`;
+  const unitName = `E2E测试部${suffix}`;
+  const memberEmail = `e2e-member-${suffix}@example.com`;
+  let unitId = 0;
+
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    await loginAsAdmin(page);
+    await page.request.post("/api/organization", { data: { action: "removeMember", email: memberEmail } });
+    if (unitId) await page.request.delete(`/api/organization?id=${unitId}`);
+    await page.close();
+  });
+
+  test("建部门 → 分配员工 → 员工出现在所属部门", async ({ page }) => {
+    const created = await page.request.post("/api/organization", {
+      data: { action: "createUnit", name: unitName, unitType: "部门" },
+    });
+    expect(created.status()).toBe(200);
+
+    const afterCreate = await (await page.request.get("/api/organization")).json();
+    unitId = afterCreate.units.find((unit: { name: string }) => unit.name === unitName)?.id;
+    expect(unitId).toBeTruthy();
+
+    const assigned = await page.request.post("/api/organization", {
+      data: { action: "assignMember", email: memberEmail, unitId: String(unitId), jobTitle: "测试岗" },
+    });
+    expect(assigned.status()).toBe(200);
+
+    const body = await (await page.request.get("/api/organization")).json();
+    const member = body.members.find((item: { email: string }) => item.email === memberEmail);
+    expect(member).toBeTruthy();
+    expect(member.unitId).toBe(unitId);
+    expect(member.unitName).toBe(unitName);
+    expect(member.jobTitle).toBe("测试岗");
+  });
+
+  test("同一上级下建同名部门返回 409", async ({ page }) => {
+    const res = await page.request.post("/api/organization", {
+      data: { action: "createUnit", name: unitName, unitType: "部门" },
+    });
+    expect(res.status()).toBe(409);
+    expect((await res.json()).error).toContain("同名部门");
+  });
+
+  test("加空格的同名部门同样被拦截", async ({ page }) => {
+    const res = await page.request.post("/api/organization", {
+      data: { action: "createUnit", name: ` ${unitName} `, unitType: "部门" },
+    });
+    expect(res.status()).toBe(409);
+  });
+
+  test("有成员的部门不能直接删除", async ({ page }) => {
+    const res = await page.request.delete(`/api/organization?id=${unitId}`);
+    expect(res.status()).toBe(409);
+  });
+
+  test("移出部门后员工从组织架构中消失", async ({ page }) => {
+    const removed = await page.request.post("/api/organization", {
+      data: { action: "removeMember", email: memberEmail },
+    });
+    expect(removed.status()).toBe(200);
+
+    const body = await (await page.request.get("/api/organization")).json();
+    expect(body.members.find((item: { email: string }) => item.email === memberEmail)).toBeFalsy();
+  });
+});
+
+// ============================================================
 // 管理后台
 // ============================================================
 test.describe("管理后台", () => {
@@ -95,12 +177,14 @@ test.describe("管理后台", () => {
     await loginAsAdmin(page);
   });
 
+  // settings 只回显 system_settings 里真实存在的行，全新库里就是个空对象。
+  // 因此这里只断言接口形状，smtpHost 的断言放到"保存后读回"里，避免用例依赖执行顺序与历史数据。
   test("GET /api/admin/settings 返回系统设置", async ({ page }) => {
     const body = await expectGetOk(page, "/api/admin/settings", "settings");
-    expect(body.settings).toHaveProperty("smtpHost");
+    expect(typeof body.settings).toBe("object");
   });
 
-  test("POST /api/admin/settings 保存 SMTP 设置", async ({ page }) => {
+  test("POST /api/admin/settings 保存 SMTP 设置后可读回", async ({ page }) => {
     const res = await page.request.post("/api/admin/settings", {
       data: { smtpHost: "smtp.test.com", smtpPort: "587", smtpAccount: "test@test.com", smtpSender: "test@test.com" },
     });
@@ -108,6 +192,10 @@ test.describe("管理后台", () => {
     const body = await res.json();
     expect(body).toHaveProperty("ok");
     expect(body.ok).toBe(true);
+
+    const saved = await expectGetOk(page, "/api/admin/settings", "settings");
+    expect(saved.settings.smtpHost).toBe("smtp.test.com");
+    expect(saved.settings.smtpPort).toBe("587");
   });
 });
 
@@ -131,7 +219,9 @@ test.describe("用户管理", () => {
   });
 
   test("GET /api/capabilities 返回权限能力目录", async ({ page }) => {
-    const body = await expectGetOk(page, "/api/capabilities", "capabilities", "groups", "roles", "alwaysAllow");
+    // 不再断言 alwaysAllow：早期 collect_data 被无条件放行，导致权限中心对它的设置失效，
+    // 该豁免已在 _auth.ts 里移除，接口相应不再返回这个字段（见 _auth.ts 的 authorizeCapability）。
+    const body = await expectGetOk(page, "/api/capabilities", "capabilities", "groups", "roles");
     expect(Array.isArray(body.capabilities)).toBe(true);
     expect(Array.isArray(body.groups)).toBe(true);
   });
