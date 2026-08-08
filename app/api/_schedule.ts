@@ -1,0 +1,52 @@
+// 定时任务的时间计算。
+//
+// 库里一律存 UTC，界面一律北京时间——容器没有设 TZ，默认就是 UTC，
+// 不把这件事定死的话，用户填的"每天 9 点"会变成下午 5 点才跑。
+//
+// 中国不实行夏令时，北京时间恒为 UTC+8，所以这里用固定偏移而不是 Intl 时区库。
+// 本模块不依赖 cloudflare:workers，可被单元测试直接导入。
+
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 解析界面填的 "HH:MM"（北京时间）。格式不合法返回 null，调用方据此当作"不定时"。 */
+export function parseScheduleTime(value?: string) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/**
+ * 算出下一次该跑的时刻（UTC ISO 串），严格晚于 from。
+ *
+ * 服务器停机期间错过的任务，恢复后这里会直接给出"下一个未来时刻"，
+ * 于是错过多少天都只补跑一次，不会把积压的每一天都补一遍。
+ */
+export function nextRunAt(scheduleTime?: string, from: Date = new Date()): string | null {
+  const parsed = parseScheduleTime(scheduleTime);
+  if (!parsed) return null;
+  const beijingNow = new Date(from.getTime() + BEIJING_OFFSET_MS);
+  const todayInBeijing = Date.UTC(
+    beijingNow.getUTCFullYear(),
+    beijingNow.getUTCMonth(),
+    beijingNow.getUTCDate(),
+    parsed.hour,
+    parsed.minute,
+    0,
+    0,
+  ) - BEIJING_OFFSET_MS;
+  // 正好等于当前时刻也要推到明天，否则刚跑完的任务会被立刻再捞出来一次。
+  return new Date(todayInBeijing > from.getTime() ? todayInBeijing : todayInBeijing + DAY_MS).toISOString();
+}
+
+/** 把 UTC ISO 串显示成北京时间的 "HH:MM"，用于审计与提示文案。 */
+export function formatBeijingTime(iso?: string | null) {
+  if (!iso) return "";
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return "";
+  const beijing = new Date(time.getTime() + BEIJING_OFFSET_MS);
+  return `${String(beijing.getUTCHours()).padStart(2, "0")}:${String(beijing.getUTCMinutes()).padStart(2, "0")}`;
+}

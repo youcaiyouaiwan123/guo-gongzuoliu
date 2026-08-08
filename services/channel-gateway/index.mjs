@@ -31,8 +31,32 @@ function parseEnvAccounts() {
   return accounts;
 }
 
-async function fetchRemoteAccounts() {
-  const url = process.env.HAIXIN_GATEWAY_ACCOUNTS_URL;
+/**
+ * 叫醒 app 去跑到期的定时任务。
+ *
+ * 地址由 accounts 同步地址推导，省一个环境变量；两者本来就是同一个 app。
+ */
+async function tickSchedules() {
+  const accountsUrl = process.env.HAIXIN_GATEWAY_ACCOUNTS_URL;
+  const secret = process.env.HAIXIN_GATEWAY_ADMIN_SECRET?.trim();
+  if (!accountsUrl || !secret) return;
+  const url = accountsUrl.replace(/\/accounts(?:\/)?$/, "/tick");
+  if (url === accountsUrl) return;
+  try {
+    const response = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${secret}` } });
+    if (!response.ok) {
+      console.error(`[schedule] tick failed HTTP ${response.status}`);
+      return;
+    }
+    const data = await response.json().catch(() => null);
+    if (data?.handled?.length) console.log(`[schedule] ${JSON.stringify(data.handled)}`);
+  } catch (error) {
+    // 调度失败不该影响长连接网关本职工作，记一行就够。
+    console.error(`[schedule] tick error: ${error.message}`);
+  }
+}
+
+async function fetchRemoteAccounts() {  const url = process.env.HAIXIN_GATEWAY_ACCOUNTS_URL;
   if (!url) return [];
   const secret = process.env.HAIXIN_GATEWAY_ADMIN_SECRET?.trim();
   if (!secret) throw new Error("HAIXIN_GATEWAY_ADMIN_SECRET is required when remote account sync is enabled");
@@ -476,6 +500,13 @@ function isAdminRequest(request) {
 
 await syncAccounts();
 setInterval(syncAccounts, 15_000).unref();
+
+// 定时任务心跳。
+//
+// 自托管的 app 跑的是 `wrangler dev --local`，收不到 Cloudflare 的 Cron Trigger，
+// 而本进程本来就常驻、本来就每 15 秒访问一次 app，顺带把这一下也带上，
+// 免得为了"每天 9 点跑个日报"再单起一个容器。失败只记日志：调度不该拖垮长连接网关。
+setInterval(() => { void tickSchedules(); }, 60_000).unref();
 
 setInterval(() => {
   for (const { account } of running.values()) void heartbeat(account);
