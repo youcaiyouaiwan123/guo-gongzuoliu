@@ -50,3 +50,36 @@ export function formatBeijingTime(iso?: string | null) {
   const beijing = new Date(time.getTime() + BEIJING_OFFSET_MS);
   return `${String(beijing.getUTCHours()).padStart(2, "0")}:${String(beijing.getUTCMinutes()).padStart(2, "0")}`;
 }
+
+// —— 主动制（事件触发）轮询车道 ——
+// 定时制按"每天几点"跑；主动制按"每隔几分钟检查一次"跑。两者都复用 workflows.next_run_at 作为
+// 下次触发时刻，只是计算方式不同，所以这里给出独立的纯函数，便于单测且不依赖 cloudflare:workers。
+
+/** 轮询间隔下限（分钟）：太短会把模型接口打满，也没有业务意义。 */
+export const MIN_CHECK_INTERVAL_MIN = 1;
+/** 轮询间隔上限（分钟）：一天一次足够，更久应改用定时制。 */
+export const MAX_CHECK_INTERVAL_MIN = 1440;
+
+/** 把用户填的检查间隔夹到合法区间；非数字按默认 10 分钟。 */
+export function clampCheckInterval(value: unknown): number {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(MAX_CHECK_INTERVAL_MIN, Math.max(MIN_CHECK_INTERVAL_MIN, n));
+}
+
+/** 算出下一次该检查的时刻（UTC ISO 串），= from + interval 分钟。 */
+export function nextCheckAt(intervalMin: unknown, from: Date = new Date()): string {
+  const interval = clampCheckInterval(intervalMin);
+  return new Date(from.getTime() + interval * 60 * 1000).toISOString();
+}
+
+/**
+ * 命中后是否还在冷却期内（还不该再次触发）。
+ * lastTriggeredAt 为空表示从未触发过，永远不算在冷却期。cooldownMin<=0 表示不冷却。
+ */
+export function withinCooldown(lastTriggeredAt: string | null | undefined, cooldownMin: number, now: Date = new Date()): boolean {
+  if (!lastTriggeredAt || cooldownMin <= 0) return false;
+  const last = Date.parse(lastTriggeredAt);
+  if (Number.isNaN(last)) return false;
+  return now.getTime() - last < cooldownMin * 60 * 1000;
+}

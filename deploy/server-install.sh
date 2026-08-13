@@ -56,24 +56,7 @@ else
   echo "ENV_EXISTS=1"
 fi
 
-if [[ ! -f "$SHARED_DIR/deploy/users.htpasswd" ]]; then
-  if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-    echo "ADMIN_PASSWORD is required to create the Nginx access account." >&2
-    exit 1
-  fi
-  ADMIN_HASH="$(openssl passwd -6 "$ADMIN_PASSWORD")"
-  printf 'admin:%s\n' "$ADMIN_HASH" > "$SHARED_DIR/deploy/users.htpasswd"
-  # 644：文件内容是 bcrypt/sha 密码哈希，nginx worker（非 root）需可读，全局可读不泄露明文。
-  chmod 644 "$SHARED_DIR/deploy/users.htpasswd"
-  echo "ADMIN_USER=admin"
-else
-  chmod 644 "$SHARED_DIR/deploy/users.htpasswd"
-  echo "ADMIN_PASSWORD_EXISTS=1"
-fi
-
 ln -sfn "$SHARED_DIR/.env" "$RELEASE_DIR/.env"
-rm -f "$RELEASE_DIR/deploy/users.htpasswd"
-ln -sfn "$SHARED_DIR/deploy/users.htpasswd" "$RELEASE_DIR/deploy/users.htpasswd"
 ln -sfn "$RELEASE_DIR" "$APP_ROOT/current"
 
 cd "$APP_ROOT/current"

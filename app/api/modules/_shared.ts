@@ -14,7 +14,7 @@ type RuntimeEnv = {
 };
 type NodeType = "input" | "knowledge" | "agent" | "data" | "ai" | "review" | "approval" | "save" | "output";
 type WorkflowNode = { id: string; type: NodeType; name: string; config?: string; modelMode?: string; parallelGroup?: string; inputMode?: "prompt" | "markdown" | "skill" | "direct"; promptGuide?: { role?: string; task?: string; context?: string; constraint?: string; format?: string; example?: string }; resourceTitle?: string; resourceContent?: string };
-type WorkflowRow = { id: number; name: string; steps: string; reviewStandard: string; maxLoops: number };
+type WorkflowRow = { id: number; name: string; steps: string; reviewStandard: string; maxLoops: number; goal?: string; stopCondition?: string; loopType?: string };
 type WorkflowRunOptions = { runId?: number; startIndex?: number; current?: string; conversationId?: number; sourceChannel?: string };
 const runtime = env as unknown as RuntimeEnv;
 
@@ -73,6 +73,16 @@ async function ensureSchema() {
   await ensureColumn(runtime.DB, "workflows", "schedule_time", "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(runtime.DB, "workflows", "next_run_at", "TEXT");
   await ensureColumn(runtime.DB, "workflows", "enabled", "INTEGER NOT NULL DEFAULT 0");
+  // 持续任务（自动任务）的用户目标：以前只存在前端表单里，从没落库，
+  // 于是定时/循环执行时节点拿不到目标，模型只能对着"定时触发"空转。详见修复计划。
+  await ensureColumn(runtime.DB, "workflows", "goal", "TEXT NOT NULL DEFAULT ''");
+  // 主动制（事件触发）：事件源 + 自然语言触发条件，AI 判定命中后直接跑该工作流。详见 drizzle/0024。
+  // watch_source_type: data_source | inbound_message | free（空=非主动制）。
+  await ensureColumn(runtime.DB, "workflows", "watch_source_type", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "watch_source_ref", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "trigger_condition", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "check_interval_min", "INTEGER NOT NULL DEFAULT 10");
+  await ensureColumn(runtime.DB, "workflows", "last_triggered_at", "TEXT");
 }
 
 async function getModel(email: string, mode = "auto") {
@@ -95,11 +105,30 @@ async function getModel(email: string, mode = "auto") {
 async function askModel(email: string, instruction: string, content: string, mode = "auto") {
   const model = await getModel(email, mode);
   if (!model) throw new Error("尚未配置模型API，请先到“模型接入”填写自己的API");
-  const result = await callModel(model, [
+  const messages = [
       { role: "system", content: "你是企业工作流执行器。只处理提供的信息，不虚构数据；输出可直接交付的中文结果。" },
       { role: "user", content: `${instruction}\n\n待处理内容：\n${content}` },
-    ], { temperature: 0.2 });
-  return result.trim() || "模型未返回内容";
+    ];
+  // 持续任务一轮要串行跑「执行→审查→评估」多次调用，上游（claudecc.top）偶发排队会让某一次
+  // 生成超过中转层 90s 而报 model relay timeout，进而拖垮整个 run。这里只对「超时类」错误自动重试
+  // 一次（短暂退避）；鉴权/参数等确定性错误立即抛出，重试无意义。仅执行器路径重试，交互聊天不受影响。
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await callModel(model, messages, { temperature: 0.2 });
+      return result.trim() || "模型未返回内容";
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const isTimeout = /relay timeout|没有响应|超时|timeout/i.test(message);
+      if (attempt === 0 && isTimeout) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
 }
 
 /**

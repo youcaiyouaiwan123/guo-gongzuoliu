@@ -62,6 +62,74 @@ function prepareAiNode(node: WorkflowNode, input: string) {
   return { instruction: instruction || node.config || node.name, content: input };
 }
 
+/**
+ * 循环评估：一轮执行完后，对照"任务目标 / 合格标准 / 停止条件"判断是否达标。
+ * 让模型只吐一行 JSON {pass, feedback}；宽松解析，解析失败按未通过处理（有 maxLoops 兜底不会死循环）。
+ * 这一步本身也作为一条 workflow_step_runs 落库（step_type=review，名"循环评估"），运行详情时间线可见。
+ */
+async function judgeLoop(
+  actor: string,
+  criteria: { goal: string; standard: string; stopCondition: string },
+  current: string,
+  runId: number,
+  stepIndex: number,
+): Promise<{ pass: boolean; feedback: string }> {
+  const rules = [
+    criteria.goal && `任务目标：${criteria.goal}`,
+    criteria.standard && `合格标准：${criteria.standard}`,
+    criteria.stopCondition && `停止条件：${criteria.stopCondition}`,
+  ].filter(Boolean).join("\n") || "内容完整、事实有依据、可直接交付";
+  const started = new Date().toISOString();
+  const step = await runtime.DB.prepare("INSERT INTO workflow_step_runs(run_id,step_index,step_type,step_name,status,input,started_at) VALUES(?,?,?,?,?,?,?) RETURNING id")
+    .bind(runId, stepIndex, "review", "循环评估", "运行中", current.slice(0, 12000), started).first<{ id: number }>();
+  try {
+    const instruction = `你是严格的质量审查员。请对照下列要求，判断“当前结果”是否已经合格、并满足停止条件：\n${rules}\n\n只输出一行 JSON，不要任何多余文字或代码块：{"pass": true 或 false, "feedback": "若未通过，明确指出还缺什么、下一轮如何改进；已通过则留空"}。`;
+    const raw = await askModel(actor, instruction, current, "auto");
+    let pass = false;
+    let feedback = raw.trim();
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]) as { pass?: unknown; feedback?: unknown };
+        pass = parsed.pass === true;
+        feedback = String(parsed.feedback ?? "").trim();
+      }
+    } catch {}
+    await runtime.DB.prepare("UPDATE workflow_step_runs SET status='已完成',output=?,finished_at=? WHERE id=?")
+      .bind(`判定：${pass ? "通过" : "未通过"}${feedback ? `\n${feedback}` : ""}`.slice(0, 12000), new Date().toISOString(), step!.id).run();
+    return { pass, feedback };
+  } catch (error) {
+    // 评估这步本身失败（多半是模型接口挂了），不再空转：记失败并停止循环，已产出的结果照常返回。
+    const message = error instanceof Error ? error.message : "循环评估失败";
+    await runtime.DB.prepare("UPDATE workflow_step_runs SET status='失败',error=?,finished_at=? WHERE id=?")
+      .bind(message, new Date().toISOString(), step!.id).run();
+    return { pass: true, feedback: "" };
+  }
+}
+
+/**
+ * 主动制（事件触发）触发判定：让模型对照"触发条件"看"观察内容"是否命中。
+ * 与 judgeLoop 不同，这一步发生在工作流"运行之前"，此时还没有 workflow_run，
+ * 所以不落 step 记录，只是一次轻量模型调用；解析失败按"未命中"处理（宁可漏触发也不误触发）。
+ */
+export async function judgeTrigger(
+  actor: string,
+  condition: string,
+  observation: string,
+): Promise<{ trigger: boolean; reason: string }> {
+  const instruction = `你是主动监测判定器。请判断下面的"观察内容"是否满足给定的"触发条件"。\n触发条件：${condition}\n\n只输出一行 JSON，不要任何多余文字或代码块：{"trigger": true 或 false, "reason": "命中则说明依据；未命中则简述原因"}。判定要保守：只有确有证据满足条件才 true。`;
+  try {
+    const raw = await askModel(actor, instruction, observation, "auto");
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return { trigger: false, reason: "" };
+    const parsed = JSON.parse(match[0]) as { trigger?: unknown; reason?: unknown };
+    return { trigger: parsed.trigger === true, reason: String(parsed.reason ?? "").trim() };
+  } catch {
+    // 模型接口异常或返回不可解析：按未命中处理，等下一轮再评估，绝不误触发工作流。
+    return { trigger: false, reason: "" };
+  }
+}
+
 async function workflowApprover(actor: string) {
   const member = await runtime.DB.prepare(
     "SELECT m.direct_manager_email AS directManagerEmail,u.manager_email AS unitManagerEmail FROM org_members m LEFT JOIN org_units u ON u.id=m.unit_id WHERE m.email=?"
@@ -85,11 +153,25 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
   } else {
     await runtime.DB.prepare("UPDATE workflow_runs SET status='运行中',error='',finished_at=NULL WHERE id=?").bind(runId).run();
   }
-  let current = options.current ?? input;
+  // 持续任务（loop_type≠单次）才进"执行→审查→循环评估→返工"的真循环；
+  // 可视化构建器的普通工作流恒为"单次"：maxLoops=1、base=0，行为与改造前逐字节一致。
+  const isLoopTask = (workflow.loopType || "单次") !== "单次";
+  const maxLoops = isLoopTask ? Math.min(10, Math.max(1, Number(workflow.maxLoops) || 3)) : 1;
+  // 定时触发/历史任务传进来的是"定时触发"这类占位输入，用工作流目标兜底，避免节点空转。
+  const goal = (workflow.goal || "").trim();
+  const seed = goal && ["", "定时触发", "执行本次工作流", "执行任务"].includes((input || "").trim()) ? goal : input;
+  // 返工轮从"第一个非输入节点"重跑：input 节点会用固定模板覆盖 current，重跑它会冲掉上一轮的返工意见。
+  const firstWorkIndex = Math.max(0, nodes.findIndex(node => node.type !== "input"));
+  let current = options.current ?? seed;
   const startIndex = Math.max(0, options.startIndex || 0);
   const membership = await runtime.DB.prepare("SELECT unit_id AS unitId FROM org_members WHERE email=?").bind(actor).first<{ unitId: number }>();
+  let loopsRun = 0;
   try {
-    for (let index = startIndex; index < nodes.length; index++) {
+    for (let loop = 0; loop < maxLoops; loop++) {
+      loopsRun = loop + 1;
+      const base = loop * nodes.length;
+      const from = loop === 0 ? startIndex : firstWorkIndex;
+      for (let index = from; index < nodes.length; index++) {
       const node = nodes[index];
       if (node.parallelGroup) {
         const groupInput = current;
@@ -102,7 +184,7 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
         const results = await Promise.all(parallelNodes.map(async branch => {
           const started = new Date().toISOString();
           const step = await runtime.DB.prepare("INSERT INTO workflow_step_runs(run_id,step_index,step_type,step_name,status,input,started_at) VALUES(?,?,?,?,?,?,?) RETURNING id")
-            .bind(runId, branch.index, branch.node.type, branch.node.name, "运行中", groupInput.slice(0, 12000), started).first<{ id: number }>();
+            .bind(runId, base + branch.index, branch.node.type, branch.node.name, "运行中", groupInput.slice(0, 12000), started).first<{ id: number }>();
           try {
             const prepared = prepareAiNode(branch.node, groupInput);
             const output = await askModel(actor, prepared.instruction, prepared.content, branch.node.modelMode || "auto");
@@ -118,29 +200,29 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
         }));
         current = results.map((result, resultIndex) => `【并行任务 ${resultIndex + 1}：${result.name}】\n${result.output}`).join("\n\n");
         await runtime.DB.prepare("UPDATE workflow_runs SET current_step=?,output=? WHERE id=?")
-          .bind(cursor, current.slice(0, 12000), runId).run();
+          .bind(base + cursor, current.slice(0, 12000), runId).run();
         index = cursor - 1;
         continue;
       }
       const started = new Date().toISOString();
       const step = await runtime.DB.prepare("INSERT INTO workflow_step_runs(run_id,step_index,step_type,step_name,status,input,started_at) VALUES(?,?,?,?,?,?,?) RETURNING id")
-        .bind(runId, index, node.type, node.name, "运行中", current.slice(0, 12000), started).first<{ id: number }>();
+        .bind(runId, base + index, node.type, node.name, "运行中", current.slice(0, 12000), started).first<{ id: number }>();
       try {
         if (node.type === "input") {
           if (node.inputMode === "direct") {
-            current = `${node.config ? `【直接需求】\n${node.config}\n\n` : ""}【本次输入】\n${input}`;
+            current = `${node.config ? `【直接需求】\n${node.config}\n\n` : ""}【本次输入】\n${seed}`;
           } else if (node.inputMode === "markdown" || node.inputMode === "skill") {
-            current = `【本次输入】\n${input}\n\n【调用${node.inputMode === "skill" ? " Skill" : " Markdown"}：${node.resourceTitle || "未命名"}】\n${node.resourceContent || "未配置内容"}`;
+            current = `【本次输入】\n${seed}\n\n【调用${node.inputMode === "skill" ? " Skill" : " Markdown"}：${node.resourceTitle || "未命名"}】\n${node.resourceContent || "未配置内容"}`;
           } else {
             const guide = node.promptGuide || {};
             const structured = [
               ["角色（Role）", guide.role], ["任务（Task）", guide.task], ["上下文（Context）", guide.context],
               ["约束（Constraint）", guide.constraint], ["格式（Format）", guide.format], ["示例（Example）", guide.example],
             ].filter(([,value])=>value).map(([label,value])=>`【${label}】\n${value}`).join("\n\n");
-            current = `${structured ? `${structured}\n\n` : ""}【本次输入】\n${input}`;
+            current = `${structured ? `${structured}\n\n` : ""}【本次输入】\n${seed}`;
           }
         } else if (node.type === "knowledge") {
-          const words = Array.from(new Set((`${input} ${node.config || ""}`).match(/[\u4e00-\u9fff]{2,}|[a-zA-Z0-9_-]{3,}/g) || [])).slice(0, 5);
+          const words = Array.from(new Set((`${seed} ${node.config || ""}`).match(/[\u4e00-\u9fff]{2,}|[a-zA-Z0-9_-]{3,}/g) || [])).slice(0, 5);
           let sql = "SELECT title,content FROM knowledge_documents WHERE (visibility='全员' OR visibility=? OR (visibility='部门' AND department_id=?))";
           const binds: unknown[] = [role, membership?.unitId || -1];
           if (words.length) {
@@ -193,17 +275,23 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
         }
         await runtime.DB.prepare("UPDATE workflow_step_runs SET status='已完成',output=?,finished_at=? WHERE id=?")
           .bind(current.slice(0, 12000), new Date().toISOString(), step!.id).run();
-        await runtime.DB.prepare("UPDATE workflow_runs SET current_step=?,output=? WHERE id=?").bind(index + 1, current.slice(0, 12000), runId).run();
+        await runtime.DB.prepare("UPDATE workflow_runs SET current_step=?,output=? WHERE id=?").bind(base + index + 1, current.slice(0, 12000), runId).run();
       } catch (error) {
         const message = error instanceof Error ? error.message : "步骤执行失败";
         await runtime.DB.prepare("UPDATE workflow_step_runs SET status='失败',error=?,finished_at=? WHERE id=?").bind(message, new Date().toISOString(), step!.id).run();
         throw error;
       }
+      }
+      if (!isLoopTask) break;
+      // 循环评估：对照 目标/合格标准/停止条件 判定是否达标；未达标带返工意见进入下一轮。
+      const verdict = await judgeLoop(actor, { goal, standard: workflow.reviewStandard || "", stopCondition: workflow.stopCondition || "" }, current, runId, base + nodes.length);
+      if (verdict.pass || loop === maxLoops - 1) break;
+      current = `${current}\n\n【上一轮未达标 · 返工要求】\n${verdict.feedback}\n\n请据此改进后重新产出完整、可直接交付的最终结果。`;
     }
     const finished = new Date().toISOString();
     await runtime.DB.prepare("UPDATE workflow_runs SET status='已完成',output=?,finished_at=? WHERE id=?").bind(current.slice(0, 12000), finished, runId).run();
     await runtime.DB.prepare("UPDATE workflows SET status='已完成',last_run_at=? WHERE id=?").bind(finished, workflow.id).run();
-    await audit(actor, "运行工作流", workflow.name, "成功", `运行#${runId}完成${nodes.length}个步骤`);
+    await audit(actor, "运行工作流", workflow.name, "成功", isLoopTask ? `循环任务完成，共 ${loopsRun} 轮` : `运行#${runId}完成${nodes.length}个步骤`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "工作流执行失败";
     await runtime.DB.prepare("UPDATE workflow_runs SET status='失败',error=?,finished_at=? WHERE id=?").bind(message, new Date().toISOString(), runId).run();
@@ -215,7 +303,7 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
 
 export async function runWorkflowById(id: number, actor: string, role: string, input: string, options: WorkflowRunOptions = {}) {
   await ensureSchema();
-  const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops FROM workflows WHERE id=? AND status<>'停用'")
+  const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops,goal,stop_condition AS stopCondition,loop_type AS loopType FROM workflows WHERE id=? AND status<>'停用'")
     .bind(id).first<WorkflowRow>();
   if (!workflow) throw new Error("工作流不存在或已停用");
   return executeWorkflow(workflow, actor, role, input || "执行本次工作流", options);
@@ -229,7 +317,7 @@ export async function resumeApprovedWorkflow(runId: number, actor: string, role:
   const approval = await runtime.DB.prepare("SELECT status FROM approval_requests WHERE workflow_run_id=? AND workflow_step_index=? ORDER BY id DESC LIMIT 1")
     .bind(runId, run.currentStep).first<{ status: string }>();
   if (approval?.status !== "已通过") throw new Error("审批尚未通过，工作流不能继续");
-  const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops FROM workflows WHERE id=?")
+  const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops,goal,stop_condition AS stopCondition,loop_type AS loopType FROM workflows WHERE id=?")
     .bind(run.workflowId).first<WorkflowRow>();
   if (!workflow) throw new Error("原工作流已被删除，无法继续执行");
   await runtime.DB.prepare("UPDATE workflow_step_runs SET status='已完成',finished_at=? WHERE run_id=? AND step_index=? AND status='等待审批'")

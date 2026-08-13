@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { authorizeCapability } from "../_auth";
 import { runWorkflowById } from "../modules/route";
-import { callModel } from "../_modelProvider";
+import { callModel, type ModelMessage } from "../_modelProvider";
 import { decryptSecret } from "../_crypto";
 import { createApp, auth, success, fail } from "../_app";
+import { validateOcrImages } from "../modules/_collection";
 import { log } from "../_logger";
 
 type RuntimeEnv = {
@@ -125,7 +126,7 @@ app.get("*", async (c) => {
 app.post("*", async (c) => {
   const { user } = c.var;
   await ensureSchema();
-  const body = await c.req.json<{ action?: string; message?: string; agentId?: number; workflowId?: number; conversationId?: number; modelMode?: string; knowledgeMode?: "native" | "knowledge" }>();
+  const body = await c.req.json<{ action?: string; message?: string; agentId?: number; workflowId?: number; conversationId?: number; modelMode?: string; knowledgeMode?: "native" | "knowledge"; images?: string[] }>();
   const message = body.message?.trim();
   const role = user.businessRole;
   log.info("聊天请求", { email: user.email, action: body.action || "chat", hasMessage: !!message, conversationId: body.conversationId, knowledgeMode: body.knowledgeMode, modelMode: body.modelMode });
@@ -322,10 +323,27 @@ app.post("*", async (c) => {
   const knowledgeInstruction = shouldUseKnowledge
     ? `本轮用户已明确要求调用知识。只能依据下面提供且有权访问的资料回答；资料不足时明确说明不知道。\n\n企业资料：\n${context || "没有检索到匹配资料"}\n\n业务中心：\n${businessContext || "暂无可用内容"}`
     : "本轮是AI原生对话。不要检索、引用或假装使用企业知识库、个人知识库、沉淀中心或其他业务数据；请直接使用模型自身能力回答。";
-  const modelMessages = [
+  // 本轮上传的图片：直接交给多模态模型识别，仅本轮有效、不落库（与「截图识别」一致）。
+  let validatedImages: string[] = [];
+  if (Array.isArray(body.images) && body.images.length) {
+    const checked = validateOcrImages(body.images);
+    if ("error" in checked) return fail(checked.error, 400);
+    validatedImages = checked.dataUrls;
+  }
+  const modelMessages: ModelMessage[] = [
         { role: "system", content: `你是海芯博创企业助手。当前用户角色：${role}。不得泄露密钥、密码、工资明细或超出角色范围的信息。运行工作流、采集数据、提交或决定审批、对外发送、修改和删除必须明确列出将执行的动作并要求用户确认，不能假装已经执行。${agentContext}\n\n${knowledgeInstruction}\n\n较早对话的自动压缩摘要：\n${compressedHistory || "暂无，当前对话尚未超过20条消息"}` },
         ...conversationMessages,
       ];
+  // 仅把图片挂到本轮最新的 user 消息上（历史消息保持纯文本 content 不变）。
+  if (validatedImages.length) {
+    const last = modelMessages[modelMessages.length - 1];
+    if (last && last.role !== "system" && typeof last.content === "string") {
+      last.content = [
+        { type: "text", text: last.content },
+        ...validatedImages.map(url => ({ type: "image_url" as const, image_url: { url } })),
+      ];
+    }
+  }
   let answer = "";
   try {
     answer = await callModel({ provider: selectedModel?.provider || runtime.MODEL_PROVIDER || "OpenAI", baseUrl: base, model, apiKey: selectedModel?.apiKey || runtime.MODEL_API_KEY || "" }, modelMessages, { temperature: 0.2 });

@@ -17,7 +17,19 @@ type RuntimeEnv = {
 };
 const runtime = env as unknown as RuntimeEnv;
 
-async function ensureSchema() {
+// schema 建表+补列较重，进程内只需跑一次；后续请求直接复用同一 Promise。
+// 失败则清空以便下次请求重试。
+let schemaReady: Promise<void> | null = null;
+function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = ensureSchemaOnce().catch(error => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+async function ensureSchemaOnce() {
   await runtime.DB.batch([
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_units (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,unit_type TEXT NOT NULL DEFAULT '部门',parent_id INTEGER,manager_email TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL DEFAULT 0,created_by TEXT NOT NULL,created_at TEXT NOT NULL)"),
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS org_members (email TEXT PRIMARY KEY,unit_id INTEGER NOT NULL,job_title TEXT NOT NULL DEFAULT '员工',direct_manager_email TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '在岗',updated_at TEXT NOT NULL)"),

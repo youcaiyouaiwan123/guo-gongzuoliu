@@ -3,7 +3,7 @@ import { log } from "../_logger";
 
 import { runtime, ensureSchema, audit, askModelWithImages } from "./_shared";
 import { encryptSecret, decryptSecret } from "../_crypto";
-import { nextRunAt } from "../_schedule";
+import { nextRunAt, nextCheckAt, clampCheckInterval } from "../_schedule";
 import type { WorkflowRow } from "./_shared";
 import {
   collectSource,
@@ -23,9 +23,9 @@ import {
   invalidRequestHeaders,
   validateOcrImages,
 } from "./_collection";
-import { executeWorkflow, getRun, parseNodes, runWorkflowById, resumeApprovedWorkflow } from "./_workflow";
+import { executeWorkflow, getRun, parseNodes, runWorkflowById, resumeApprovedWorkflow, judgeTrigger } from "./_workflow";
 
-export { runWorkflowById, resumeApprovedWorkflow, collectSource };
+export { runWorkflowById, resumeApprovedWorkflow, collectSource, judgeTrigger };
 
 
 const app = createApp();
@@ -55,7 +55,7 @@ app.get("*", async (c) => {
     : runtime.DB.prepare("SELECT id,source_id AS sourceId,source_name AS sourceName,actor,status,http_status AS httpStatus,row_count AS rowCount,content_type AS contentType,preview,error,model_used AS modelUsed,target_store AS targetStore,output_format AS outputFormat,collector_mode AS collectorMode,created_at AS createdAt,published_at AS publishedAt FROM data_collection_runs WHERE actor=? ORDER BY id DESC LIMIT 30").bind(user.email);
   const [agents, workflows, sources, runs, collectionRuns, agentRuns] = await runtime.DB.batch([
     agentQuery,
-    runtime.DB.prepare("SELECT id,name,trigger_type AS triggerType,steps,status,loop_type AS loopType,review_mode AS reviewMode,review_standard AS reviewStandard,stop_condition AS stopCondition,max_loops AS maxLoops,final_action AS finalAction,failure_action AS failureAction,last_run_at AS lastRunAt,created_at AS createdAt FROM workflows ORDER BY id DESC"),
+    runtime.DB.prepare("SELECT id,name,trigger_type AS triggerType,steps,status,loop_type AS loopType,review_mode AS reviewMode,review_standard AS reviewStandard,stop_condition AS stopCondition,max_loops AS maxLoops,final_action AS finalAction,failure_action AS failureAction,goal,last_run_at AS lastRunAt,created_at AS createdAt FROM workflows ORDER BY id DESC"),
     runtime.DB.prepare("SELECT s.id,s.name,s.source_type AS sourceType,s.source_url AS sourceUrl,s.schedule,s.status,s.last_run_at AS lastRunAt,s.created_at AS createdAt,d.request_method AS requestMethod,d.request_headers AS requestHeaders,d.content_selector AS contentSelector,d.extract_fields AS extractFields,d.target_category AS targetCategory,d.visibility,d.publish_mode AS publishMode,d.sample_data AS sampleData,d.model_mode AS modelMode,d.target_store AS targetStore,d.output_format AS outputFormat,d.collector_mode AS collectorMode,d.platform,d.keyword,d.crawl_depth AS crawlDepth,d.max_pages AS maxPages,d.url_pattern AS urlPattern,d.exclude_pattern AS excludePattern,d.include_comments AS includeComments,d.export_profile AS exportProfile,d.respect_robots AS respectRobots FROM data_sources s LEFT JOIN data_source_details d ON d.source_id=s.id ORDER BY s.id DESC"),
     runQuery,
     collectionRunQuery,
@@ -144,9 +144,30 @@ app.post("*", async (c) => {
     const firstRun = nextRunAt(scheduleTime, new Date());
     if (scheduleTime && !firstRun) return fail("运行时间请按 24 小时制填写，例如 09:00（北京时间）。", 400);
     if (body.loopType === "定时制" && !firstRun) return fail("选择了定时制，请填写每天的运行时间（北京时间），例如 09:00。", 400);
-    await runtime.DB.prepare("INSERT INTO workflows(name,trigger_type,steps,status,loop_type,review_mode,review_standard,stop_condition,max_loops,final_action,failure_action,created_at,created_by,schedule_time,next_run_at,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(body.name.trim(), body.triggerType || "手动触发", JSON.stringify(nodes), "已启用", body.loopType || "单次", body.reviewMode || "明确标准", body.reviewStandard || "", body.stopCondition || "", Math.min(10, Math.max(1, Number(body.maxLoops) || 3)), body.finalAction || "输出结果", body.failureAction || "通知负责人", now, actor, scheduleTime, firstRun, firstRun ? 1 : 0).run();
-    await audit(actor, "创建工作流", body.name, "成功", `${nodes.map(n => n.name).join(" → ")}${firstRun ? `；每天 ${scheduleTime} 自动运行，首次 ${new Date(firstRun).toLocaleString("zh-CN")}` : "；手动触发"}`);
+    // 主动制（事件触发）：事件源 + 自然语言触发条件，AI 判定命中后直接跑本工作流。
+    // Lane A（data_source/free）复用 next_run_at 作为"下次检查时刻"，enabled=1 交给 tick 轮询；
+    // Lane B（inbound_message）next_run_at 恒为 NULL，由渠道消息入口即时评估。
+    const isProactive = body.loopType === "主动制";
+    const watchSourceType = isProactive ? String(body.watchSourceType || "free").trim() : "";
+    const watchSourceRef = isProactive ? String(body.watchSourceRef || "").trim() : "";
+    const triggerCondition = isProactive ? String(body.triggerCondition || "").trim() : "";
+    const checkIntervalMin = clampCheckInterval(body.checkInterval);
+    if (isProactive) {
+      if (!["data_source", "inbound_message", "free"].includes(watchSourceType)) return fail("请选择主动制的事件源类型。", 400);
+      if (!triggerCondition) return fail("主动制需要填写触发条件（用一句话描述什么情况下该触发）。", 400);
+      if (watchSourceType === "data_source" && !(Number(watchSourceRef) > 0)) return fail("选择了「指定数据源」，请选一个要监测的数据源。", 400);
+      if (watchSourceType === "inbound_message" && !watchSourceRef) return fail("选择了「渠道消息」，请选择要监听的平台。", 400);
+    }
+    // 主动制的触发时机由 watch_source_type 决定，不走 schedule_time；轮询车道用 nextCheckAt 起排期。
+    const proactiveNextRun = isProactive && watchSourceType !== "inbound_message" ? nextCheckAt(checkIntervalMin, new Date()) : null;
+    const nextRun = isProactive ? proactiveNextRun : firstRun;
+    const enabled = isProactive ? 1 : (firstRun ? 1 : 0);
+    await runtime.DB.prepare("INSERT INTO workflows(name,trigger_type,steps,status,loop_type,review_mode,review_standard,stop_condition,max_loops,final_action,failure_action,created_at,created_by,schedule_time,next_run_at,enabled,goal,watch_source_type,watch_source_ref,trigger_condition,check_interval_min) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(body.name.trim(), body.triggerType || "手动触发", JSON.stringify(nodes), "已启用", body.loopType || "单次", body.reviewMode || "明确标准", body.reviewStandard || "", body.stopCondition || "", Math.min(10, Math.max(1, Number(body.maxLoops) || 3)), body.finalAction || "输出结果", body.failureAction || "通知负责人", now, actor, scheduleTime, nextRun, enabled, body.goal || "", watchSourceType, watchSourceRef, triggerCondition, checkIntervalMin).run();
+    const proactiveNote = isProactive
+      ? (watchSourceType === "inbound_message" ? "；收到渠道消息时评估触发" : `；每 ${checkIntervalMin} 分钟检查一次`)
+      : (firstRun ? `；每天 ${scheduleTime} 自动运行，首次 ${new Date(firstRun).toLocaleString("zh-CN")}` : "；手动触发");
+    await audit(actor, "创建工作流", body.name, "成功", `${nodes.map(n => n.name).join(" → ")}${proactiveNote}`);
   } else if (body.type === "source") {
     const sourceId = Number(body.id || 0);
     if (!body.name?.trim() || !body.sourceType) return fail("请填写数据源名称和类型", 400);
@@ -187,14 +208,14 @@ app.post("*", async (c) => {
     await audit(actor, "添加数据源", body.name, "成功", `${body.sourceType}；入库：${targetStoreLabels[targetStore]}；格式：${outputFormatLabels[outputFormat]}；方式：${collectorModeLabels[collectorMode]}`);
     return success({ ok: true, id: created!.id }, 201);
   } else if (body.type === "run" && body.module === "workflow") {
-    const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops FROM workflows WHERE id=?").bind(Number(body.id)).first<WorkflowRow>();
+    const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops,goal,stop_condition AS stopCondition,loop_type AS loopType FROM workflows WHERE id=?").bind(Number(body.id)).first<WorkflowRow>();
     if (!workflow) return fail("工作流不存在", 404);
     const run = await executeWorkflow(workflow, actor, user.businessRole, body.input?.trim() || "执行本次工作流");
     return success({ ok: true, run }, 201);
   } else if (body.type === "retry") {
     const previous = await runtime.DB.prepare("SELECT workflow_id AS workflowId,input FROM workflow_runs WHERE id=? AND (actor=? OR ?='管理员')").bind(Number(body.runId), actor, user.role).first<{ workflowId: number; input: string }>();
     if (!previous) return fail("没有找到可重试的运行记录", 404);
-    const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops FROM workflows WHERE id=?").bind(previous.workflowId).first<WorkflowRow>();
+    const workflow = await runtime.DB.prepare("SELECT id,name,steps,review_standard AS reviewStandard,max_loops AS maxLoops,goal,stop_condition AS stopCondition,loop_type AS loopType FROM workflows WHERE id=?").bind(previous.workflowId).first<WorkflowRow>();
     const run = await executeWorkflow(workflow!, actor, user.businessRole, previous.input);
     return success({ ok: true, run }, 201);
   } else if (body.type === "run" && body.module === "source") {

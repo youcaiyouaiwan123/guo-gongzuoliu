@@ -28,7 +28,19 @@ function inferProvider(model = "") {
   return "自定义图片模型";
 }
 
-async function ensureSchema() {
+// schema 建表在进程内只需跑一次；后续请求直接复用同一 Promise，避免每次请求都跑 DDL。
+// 失败则清空以便下次请求重试。
+let schemaReady: Promise<void> | null = null;
+function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = ensureSchemaOnce().catch(error => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+async function ensureSchemaOnce() {
   await runtime.DB.batch([
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS user_image_model_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT,owner_email TEXT NOT NULL,connection_name TEXT NOT NULL,provider TEXT NOT NULL,base_url TEXT NOT NULL,model_name TEXT NOT NULL,encrypted_api_key TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)"),
     runtime.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_image_model_profile_name ON user_image_model_profiles(owner_email,connection_name)"),

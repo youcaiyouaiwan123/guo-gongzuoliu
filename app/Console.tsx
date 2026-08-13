@@ -6,6 +6,7 @@ import { ArtifactUploadPanel, ContractsPanel, HelpPanel, MediaPanel, MonitoringP
 import { createGatewaySecret, nav, readApiResult } from "./features/constants";
 import { log, logMount, markStart, markEnd } from "./features/logger";
 import SidebarNavigation from "./features/navigation/SidebarNavigation";
+import { Pager } from "./features/Pager";
 import {
   ArrowRightIcon, ArrowUpRightIcon, BellIcon, BoltIcon, ChevronDownIcon, ChevronLeftIcon,
   ChevronRightIcon, ChevronUpIcon, ClipboardIcon, DiamondIcon, InboxIcon, MessageIcon,
@@ -68,7 +69,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [askMode, setAskMode] = useState<"quick" | "guided" | "continuous">("quick");
   const [guide, setGuide] = useState({ role: "", task: "", context: "", constraint: "", format: "", example: "" });
-  const [continuous, setContinuous] = useState({ name: "", loopType: "目标制", reviewMode: "明确标准", goal: "", triggerType: "手动触发", reviewStandard: "", stopCondition: "", maxLoops: "3", finalAction: "提交管理员审批", failureAction: "通知负责人", scheduleTime: "09:00" });
+  const [continuous, setContinuous] = useState({ name: "", loopType: "目标制", reviewMode: "明确标准", goal: "", triggerType: "手动触发", reviewStandard: "", stopCondition: "", maxLoops: "3", finalAction: "提交管理员审批", failureAction: "通知负责人", scheduleTime: "09:00", watchSourceType: "free", watchSourceRef: "", triggerCondition: "", checkInterval: "10" });
   const [busy, setBusy] = useState(false);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [personalKnowledge, setPersonalKnowledge] = useState<PersonalKnowledge[]>([]);
@@ -158,6 +159,12 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [showApproval, setShowApproval] = useState(false);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactResources, setArtifactResources] = useState<Artifact[]>([]);
+  const [artifactsPage, setArtifactsPage] = useState(1);
+  const [artifactsTotal, setArtifactsTotal] = useState(0);
+  const [artifactCounts, setArtifactCounts] = useState({ total: 0, markdown: 0, skill: 0 });
+  const [artifactOwners, setArtifactOwners] = useState<string[]>([]);
+  const ARTIFACTS_PAGE_SIZE = 20;
   const [saveDraft, setSaveDraft] = useState<SaveDraft | null>(null);
   const [artifactOwner, setArtifactOwner] = useState("全部用户");
   const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
@@ -327,9 +334,23 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
     // 仅依赖 catalog 长度变化即可触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capabilityCatalog.length]);
-  async function loadArtifacts() {
-    const response = await fetch("/api/artifacts");
-    if (response.ok) setArtifacts((await response.json()).artifacts || []);
+  async function loadArtifacts(page = artifactsPage, owner = artifactOwner) {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(ARTIFACTS_PAGE_SIZE) });
+    if (owner && owner !== "全部用户") params.set("owner", owner);
+    const response = await fetch(`/api/artifacts?${params.toString()}`);
+    if (response.ok) {
+      const data = await response.json();
+      setArtifacts(data.artifacts || []);
+      setArtifactsTotal(data.total || 0);
+      setArtifactsPage(data.page || page);
+      setArtifactCounts(data.counts || { total: 0, markdown: 0, skill: 0 });
+      setArtifactOwners(data.owners || []);
+    }
+  }
+  // 工作流构建器要用「当前用户自己」的全部 markdown/skill（含正文），与网格分页相互独立。
+  async function loadArtifactResources() {
+    const response = await fetch("/api/artifacts?scope=picker");
+    if (response.ok) setArtifactResources((await response.json()).artifacts || []);
   }
   async function loadPersonalKnowledge() {
     const response = await fetch("/api/personal-knowledge");
@@ -346,7 +367,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
       setReminders(data.reminders || { approvals: 0, reports: 0 });
     }
   }
-  useEffect(() => { loadSession(); loadState(); loadModelStatus(); loadModules(); loadConnectors(); loadGovernance(); loadCapabilities(); loadProfile(); loadArtifacts(); loadPersonalKnowledge(); loadOrganization(); loadChats(); }, []);
+  useEffect(() => { loadSession(); loadState(); loadModelStatus(); loadModules(); loadConnectors(); loadGovernance(); loadCapabilities(); loadProfile(); loadArtifacts(); loadArtifactResources(); loadPersonalKnowledge(); loadOrganization(); loadChats(); }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = window.localStorage.getItem("haixin.activeTab");
@@ -366,7 +387,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   }, [tab, appRole]);
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 5000);
+    const timer = window.setTimeout(() => setNotice(""), 2500);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -453,7 +474,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, content, artifactType: "markdown", sourceType: "chat", config: { source: "personalKnowledge", originalSourceType: sourceType } }),
     });
-    await Promise.all([loadPersonalKnowledge(), loadArtifacts(), loadState()]);
+    await Promise.all([loadPersonalKnowledge(), loadArtifacts(), loadArtifactResources(), loadState()]);
   }
 
   async function saveMessageToPersonal(message: Message, index: number) {
@@ -491,8 +512,36 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
   const CHAT_ATTACHMENT_TEXT_LIMIT = 80_000;
   const CHAT_ATTACHMENT_TOTAL_LIMIT = 180_000;
+  // 图片走多模态：直接把图交给视觉模型识别，不做文字抽取。
+  // 格式/体积与后端 validateOcrImages（api/modules/_collection.ts）保持一致：png/jpg/webp、≤5MB。
+  const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+  function isChatImage(file: File) {
+    return /^image\/(png|jpe?g|webp)$/i.test(file.type) || /\.(png|jpe?g|webp)$/i.test(file.name);
+  }
+  function readImageDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error(`「${file.name}」读取失败，请重试。`));
+      reader.readAsDataURL(file);
+    });
+  }
 
-  async function parseChatFile(file: File) {
+  async function parseChatFile(file: File): Promise<{ content: string; note: string; dataUrl?: string }> {
+    if (isChatImage(file)) {
+      if (file.size > CHAT_IMAGE_MAX_BYTES) {
+        throw new Error(`「${file.name}」图片超过 5MB，请压缩后再传。`);
+      }
+      const dataUrl = await readImageDataUrl(file);
+      if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(dataUrl)) {
+        throw new Error(`「${file.name}」图片格式不支持，请用 PNG、JPG 或 WebP。`);
+      }
+      return {
+        content: `# 图片：${file.name}`,
+        note: "图片将随本轮直接交给 AI 识别（仅本轮有效，不入库）。",
+        dataUrl,
+      };
+    }
     if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
       throw new Error(`「${file.name}」超过 10MB。聊天附件用于临时问答，大文件请先上传到个人知识库或企业知识库。`);
     }
@@ -524,7 +573,7 @@ ${content}`,
     const skipped: string[] = [];
     try {
       for (const file of Array.from(files).slice(0, 8)) {
-        let result: { content: string; note: string };
+        let result: { content: string; note: string; dataUrl?: string };
         try {
           result = await parseChatFile(file);
         } catch (error) {
@@ -539,6 +588,7 @@ ${content}`,
           content: result.content,
           note: result.note,
           mode: "round",
+          dataUrl: result.dataUrl,
         });
       }
       if (parsed.length) setChatAttachments(items => [...items, ...parsed]);
@@ -610,7 +660,7 @@ ${content}`,
     const data = await response.json();
     if (!response.ok) return setNotice(data.error || "沉淀保存失败");
     setSaveDraft(null); setNotice("已保存到沉淀中心，下次可以直接复用");
-    await Promise.all([loadArtifacts(), loadState()]);
+    await Promise.all([loadArtifacts(), loadArtifactResources(), loadState()]);
   }
 
   function reuseArtifact(item: Artifact) {
@@ -663,7 +713,7 @@ ${content}`,
     const response = await fetch(`/api/artifacts?id=${item.id}`, { method: "DELETE" });
     const data = await response.json();
     setNotice(response.ok ? "沉淀已删除" : data.error || "删除失败");
-    if (response.ok) await Promise.all([loadArtifacts(), loadState()]);
+    if (response.ok) await Promise.all([loadArtifacts(), loadArtifactResources(), loadState()]);
   }
 
 
@@ -883,7 +933,7 @@ ${content}`,
   }
 
   function selectWorkflowResource(nodeId: string, artifactId: string, mode: "markdown" | "skill") {
-    const artifact = artifacts.find(item=>String(item.id)===artifactId && item.artifactType===mode);
+    const artifact = artifactResources.find(item=>String(item.id)===artifactId && item.artifactType===mode);
     updateWorkflowInput(nodeId,{inputMode:mode,resourceTitle:artifact?.title||"",resourceContent:artifact ? `${artifact.content}\n\n配置：${artifact.config||"无"}` : ""});
   }
 
@@ -895,7 +945,8 @@ ${content}`,
     if (!conversationId) return setNotice("请先点击左侧“新建独立任务”。系统不会因发送消息或切换模型自动创建窗口。");
     const displayText = value || `请处理我上传的 ${attachments.length} 个附件`;
     const payloadText = `${displayText}${attachmentContext(attachments)}`;
-    log.info("发送消息", { conversationId, messageLength: value.length, hasAttachments: attachments.length > 0, agentId: activeAgent?.id, modelMode, knowledgeMode });
+    const images = attachments.map(item => item.dataUrl).filter((url): url is string => Boolean(url));
+    log.info("发送消息", { conversationId, messageLength: value.length, hasAttachments: attachments.length > 0, imageCount: images.length, agentId: activeAgent?.id, modelMode, knowledgeMode });
     markStart("sendMessage");
     setMessages((m) => [...m, { who: "user", text: attachments.length ? `${displayText}\n\n已附加：${attachments.map(item => item.name).join("、")}` : displayText }]);
     setInput(""); setChatAttachments([]); setBusy(true);
@@ -903,7 +954,7 @@ ${content}`,
     try {
       await persistChatAttachments(attachments);
       persisted = true;
-      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: payloadText, role, agentId: activeAgent?.id, conversationId, modelMode, knowledgeMode }) });
+      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: payloadText, role, agentId: activeAgent?.id, conversationId, modelMode, knowledgeMode, images }) });
       const data = await readApiResult(response, "服务没有返回内容，请稍后重试。");
       const answer = data.answer || data.error || "服务暂时不可用";
       setMessages((m) => [...m, { who: "bot", text: answer, sources: data.sources, sourceFiles: data.sourceFiles, modelUsed: data.usedModel }]);
@@ -990,17 +1041,38 @@ ${content}`,
 
   async function createContinuousTask(event: FormEvent) {
     event.preventDefault();
+    // 把用户填的目标/合格标准编译成"可执行的真节点"，而不是以前那串没有语义的箭头文字。
+    // input(直接需求=目标) → ai(以目标为任务) → review(合格标准) → output；
+    // 明确标准才加审查节点，探索标准模式让 AI 先产出、由人工/循环评估把关。
+    const goal = continuous.goal.trim();
+    const standard = continuous.reviewStandard.trim();
+    const nodes = [
+      { id: "loop-input", type: "input", name: "设定目标", inputMode: "direct", config: goal },
+      { id: "loop-exec", type: "ai", name: "执行任务", promptGuide: { task: goal } },
+      ...(continuous.reviewMode === "明确标准" && standard
+        ? [{ id: "loop-review", type: "review", name: "审查结果", config: standard }]
+        : []),
+      { id: "loop-output", type: "output", name: "输出结果" },
+    ];
     const response = await fetch("/api/modules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      type: "workflow", name: continuous.name, triggerType: continuous.triggerType, steps: "设定目标 → 执行任务 → 审查结果 → 循环评估",
+      type: "workflow", name: continuous.name, triggerType: continuous.triggerType, steps: JSON.stringify(nodes), goal: continuous.goal,
       loopType: continuous.loopType, reviewMode: continuous.reviewMode, reviewStandard: continuous.reviewStandard,
       stopCondition: continuous.stopCondition, maxLoops: continuous.maxLoops, finalAction: continuous.finalAction,
       failureAction: continuous.failureAction, scheduleTime: continuous.loopType === "定时制" ? continuous.scheduleTime : "",
+      watchSourceType: continuous.loopType === "主动制" ? continuous.watchSourceType : "",
+      watchSourceRef: continuous.loopType === "主动制" ? continuous.watchSourceRef : "",
+      triggerCondition: continuous.loopType === "主动制" ? continuous.triggerCondition : "",
+      checkInterval: continuous.checkInterval,
     }) });
     const data = await response.json();
     if (!response.ok) return setNotice(data.error || "持续任务创建失败");
     setNotice(continuous.loopType === "定时制"
       ? `持续任务已创建，每天 ${continuous.scheduleTime}（北京时间）自动运行`
-      : "持续任务已创建；该模式不会自动运行，需要在工作流中心手动触发");
+      : continuous.loopType === "主动制"
+        ? (continuous.watchSourceType === "inbound_message"
+          ? "持续任务已创建；收到所选渠道消息时会自动评估并按条件触发"
+          : `持续任务已创建；每 ${continuous.checkInterval} 分钟检查一次事件源，命中触发条件即自动运行`)
+        : "持续任务已创建；该模式不会自动运行，需要在工作流中心手动触发");
     await Promise.all([loadModules(), loadState()]);
     setSaveDraft({ sourceType: "loop", title: continuous.name, content: loopMarkdown(), config: JSON.stringify(continuous) });
     setTab("workflows"); setAskMode("quick");
@@ -1044,7 +1116,7 @@ ${content}`,
     if (!confirm(`确认删除选中的 ${selectedArtifactIds.length} 条沉淀吗？删除后无法恢复。`)) return;
     const result = await deleteBatch(selectedArtifactIds.map(id => `/api/artifacts?id=${id}`));
     setSelectedArtifactIds([]);
-    await Promise.all([loadArtifacts(), loadState()]);
+    await Promise.all([loadArtifacts(), loadArtifactResources(), loadState()]);
     setNotice(`已删除 ${result.ok} 条沉淀${result.failed ? `，${result.failed} 条失败` : ""}`);
   }
   async function deleteSelectedModules(moduleName: "agent" | "workflow" | "source", ids: number[], clear: (value: number[]) => void) {
@@ -1058,7 +1130,8 @@ ${content}`,
     setNotice(`已删除 ${result.ok} 个${label}${result.failed ? `，${result.failed} 个失败` : ""}`);
   }
 
-  const visibleArtifacts = artifacts.filter(item => artifactOwner === "全部用户" || item.ownerEmail === artifactOwner);
+  // 服务端已按 owner 过滤并分页，网格直接渲染当前页。批量操作以当前页为范围。
+  const visibleArtifacts = artifacts;
   // 用于在消息区中央渲染“空状态 Hero”：当用户尚未发出过任何消息且当前不在生成中时展示。
   // 这样初识状态、清空上下文、新建任务后，都给出明显的下一步引导。
   const hasUserMessage = messages.some(item => item.who === "user");
@@ -1078,7 +1151,7 @@ ${content}`,
       <div className={`workspaceBody ${tab === "chat" ? "chatBody" : ""}`}>
       {tab === "chat" && <div className={`chatLayout ${insightCollapsed?"insightCollapsed":""}`}>
         <aside className="conversationPanel"><button className="newChatButton" onClick={newChat}><PlusIcon style={{ width: 14, height: 14 }} /> 新建独立任务</button>{!!conversations.length&&<div className="conversationBulk"><label><input type="checkbox" checked={conversations.every(item=>selectedConversationIds.includes(item.id))} onChange={event=>setAllSelectedIds(conversations.map(item=>item.id),setSelectedConversationIds,event.target.checked)}/>全选</label><button disabled={!selectedConversationIds.length} onClick={deleteSelectedChats}>删除选中</button></div>}<div className="conversationList">{conversations.map(item=><div key={item.id} className={conversationId===item.id?"active":""}><div className="conversationTitleRow"><label className="conversationCheck"><input type="checkbox" checked={selectedConversationIds.includes(item.id)} onChange={()=>toggleSelectedId(selectedConversationIds,setSelectedConversationIds,item.id)}/></label><button className="conversationTitle" onClick={()=>loadChats(item.id)}>{item.title}</button><button title="重命名" aria-label={`编辑${item.title}`} onClick={()=>renameChat(item)}>编辑</button><button title="删除" aria-label={`删除${item.title}`} onClick={()=>deleteChat(item.id)}>删除</button></div><button className="conversationMeta" onClick={()=>loadChats(item.id)}>{new Date(item.updatedAt).toLocaleDateString("zh-CN")} · {modelModeShortLabel(item.modelMode)}</button></div>)}</div>{!conversations.length && <div className="conversationEmpty"><div className="conversationEmptyIcon"><MessageIcon style={{ width: 32, height: 32 }} /></div></div>}</aside>
-        <section className="chatPanel"><div className="chatTop"><div className="chatTopIdentity"><span className="botAvatar">AI</span><div className="chatTopIdentityText"><b>海芯博创企业助手</b><span className="statusBadge">身份已验证 · 模型已就绪</span></div></div>{currentConversationTitle && <div className="chatTopTask" title={currentConversationTitle}>对话：{currentConversationTitle}</div>}<div className="chatControls"><label className="modelSelect">模型<select value={modelMode} onChange={e=>changeTaskModel(e.target.value)}>{modelModeOptions}</select></label><div className="askMode"><button className={askMode==="quick"?"active":""} onClick={()=>setAskMode("quick")} title="快速提问"><BoltIcon style={{ width: 14, height: 14 }} /> 快速</button><button className={askMode==="guided"?"active":""} onClick={()=>setAskMode("guided")} title="任务向导"><ClipboardIcon style={{ width: 14, height: 14 }} /> 向导</button><button className={askMode==="continuous"?"active":""} onClick={()=>setAskMode("continuous")} title="持续任务"><RefreshIcon style={{ width: 14, height: 14 }} /> 持续</button></div><button className="iconButton clearContextIcon" onClick={clearContext} title="清空当前任务上下文" aria-label="清空当前任务上下文"><TrashIcon /></button><button className="iconButton depositIcon" onClick={saveConversationToPersonal} title="保存到个人知识" aria-label="保存到个人知识"><InboxIcon /></button><button className="iconButton depositIcon" onClick={openChatDeposit} title="沉淀为MD/Skill" aria-label="沉淀为MD/Skill"><DiamondIcon /></button></div></div>
+        <section className="chatPanel"><div className="chatTop"><div className="chatTopIdentity"><span className="botAvatar">AI</span><div className="chatTopIdentityText"><b>海芯博创企业助手</b><span className="statusBadge">身份已验证 · 模型已就绪</span></div></div>{currentConversationTitle && <div className="chatTopTask" title={currentConversationTitle}>对话：{currentConversationTitle}</div>}<div className="chatControls"><label className="modelSelect">模型<select value={modelMode} onChange={e=>changeTaskModel(e.target.value)}>{modelModeOptions}</select></label><div className="askMode"><button className={askMode==="quick"?"active":""} onClick={()=>setAskMode("quick")} title="直接与AI对话问答"><BoltIcon style={{ width: 14, height: 14 }} /> 直接问答</button><button className={askMode==="guided"?"active":""} onClick={()=>setAskMode("guided")} title="按业务引导填写，自动生成提示词"><ClipboardIcon style={{ width: 14, height: 14 }} /> 引导填写</button><button className={askMode==="continuous"?"active":""} onClick={()=>setAskMode("continuous")} title="创建可自动或定时运行的任务"><RefreshIcon style={{ width: 14, height: 14 }} /> 自动任务</button></div><button className="iconButton clearContextIcon" onClick={clearContext} title="清空当前任务上下文" aria-label="清空当前任务上下文"><TrashIcon /></button><button className="iconButton depositIcon" onClick={saveConversationToPersonal} title="保存到个人知识" aria-label="保存到个人知识"><InboxIcon /></button><button className="iconButton depositIcon" onClick={openChatDeposit} title="沉淀为MD/Skill" aria-label="沉淀为MD/Skill"><DiamondIcon /></button></div></div>
           {activeAgent && <div className="agentRunBar"><div><span>运行中的智能体</span><b>{activeAgent.name}</b><small>{activeAgent.description} · 知识范围：{activeAgent.knowledgeScope}</small></div><div><button onClick={openChatDeposit}>保存本次结果</button><button className="outline" onClick={stopAgent}>退出智能体</button></div></div>}
           {askMode==="quick" ? <><div className="messages">{!hasUserMessage && !busy && <div className="emptyHero"><div className="emptyHeroIcon" aria-hidden="true"><WaveIcon style={{ width: 36, height: 36 }} /></div><h2>欢迎使用海芯博创企业助手</h2><div className="suggestionGrid">{["根据知识库介绍公司产品", "查看我的权限", "帮我导出全部客户", "起草一份客户回访方案"].map(s => <button key={s} className="suggestionCard" onClick={() => send(undefined, s)} type="button"><span className="suggestionIcon" aria-hidden="true"><ArrowRightIcon style={{ width: 14, height: 14 }} /></span><b>{s}</b></button>)}</div><div className="emptyHeroFoot"><span>官网：https://www.haixinzhixun.com</span><div className="emptyHeroActions"><button type="button" onClick={saveConversationToPersonal} className="heroDepositButton"><PlusIcon style={{ width: 12, height: 12 }} /> 保存到个人知识</button><button type="button" onClick={openChatDeposit} className="heroDepositButton"><DiamondIcon style={{ width: 12, height: 12 }} /> 沉淀为MD/Skill</button></div></div></div>}{messages.map((m, i) => <div className={`message ${m.who}`} key={i}>{m.who === "bot" && <span className="miniAvatar">AI</span>}{m.who === "user" && <span className="miniAvatar userAvatar">{displayName.slice(0,1)}</span>}<div><p>{m.text}</p>{m.modelUsed&&<small>本次使用：{m.modelUsed}</small>}{m.sources?.length ? <small>引用资料：{m.sources.join("、")}</small> : null}{m.sourceFiles?.length?<div className="chatSources">{m.sourceFiles.map(file=><a key={file.id} href={`/api/state?download=${file.id}`}><b>{file.filename||file.title}</b><span>{file.category} · V{file.version} · {file.status}</span><em>下载</em></a>)}</div>:null}<button className="messageKnowledgeButton" type="button" onClick={()=>saveMessageToPersonal(m,i)}><PlusIcon style={{ width: 12, height: 12 }} /> 存入个人知识</button></div></div>)}{busy && <div className="message bot"><span className="miniAvatar">AI</span><div><p>{activeAgent?"正在按智能体配置处理…":knowledgeMode==="knowledge"?"正在检索个人与企业知识并生成回答…":"AI 正在生成原生回答…"}</p></div></div>}</div>
           <div className={`chatWorkflowLauncher ${workflowLauncherCollapsed?"collapsed":""}`}><div className="workflowLauncherHead"><div><div className="collapsibleTitle"><b><RefreshIcon style={{ width: 14, height: 14 }} /> 把任务交给自动化工作流</b><button type="button" onClick={()=>setWorkflowLauncherCollapsed(value=>!value)}>{workflowLauncherCollapsed?"展开":"收起"} {workflowLauncherCollapsed?<ChevronDownIcon style={{ width: 12, height: 12 }} />:<ChevronUpIcon style={{ width: 12, height: 12 }} />}</button></div></div></div>{!workflowLauncherCollapsed&&<div className="workflowLauncherControls"><select value={chatWorkflowId} onChange={e=>setChatWorkflowId(e.target.value)}><option value="">选择已启用工作流</option>{workflows.filter(item=>item.status!=="停用").map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select><button type="button" disabled={busy||!chatWorkflowId} onClick={runWorkflowInChat}>运行所选工作流</button></div>}</div>
@@ -1093,7 +1166,7 @@ ${content}`,
           </div><div className="promptPreview"><b>系统将自动整理为完整提示词</b><p>{guide.task ? [guide.role,guide.task,guide.context,guide.constraint,guide.format,guide.example].filter(Boolean).join(" ｜ ") : "选择模板或填写任务后，这里会显示内容摘要。"}</p><button disabled={busy}>{busy?"正在生成…":"提交给企业助手 →"}</button></div></form> :
           <form className="continuousGuide" onSubmit={createContinuousTask}><div className="guideIntro"><div><b>创建一个会持续工作的AI任务</b><p>选择运行方式和判断标准，确认后由自动化工作流托管。</p></div></div><div className="loopCards">{[
             ["回合制","AI通过多轮询问和沟通完成","需求访谈、方案讨论"],["目标制","AI持续执行直到达到目标","整理线索、优化方案"],["定时制","按照固定时间重复执行","日报、周报、舆情监测"],["主动制","发现事件或异常后主动执行","投诉提醒、指标异常"],
-          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label>{continuous.loopType==="定时制"&&<label>每天运行时间（北京时间）<input required type="time" value={continuous.scheduleTime} onChange={e=>setContinuous({...continuous,scheduleTime:e.target.value})}/></label>}{continuous.loopType==="主动制"&&<label className="wide">说明<small style={{ display: "block", opacity: 0.75 }}>主动制暂未接入事件源，创建后不会自动运行，需要在工作流中心手动触发。</small></label>}<label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>确认并创建 →</button></div></form>}
+          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label>{continuous.loopType==="定时制"&&<label>每天运行时间（北京时间）<input required type="time" value={continuous.scheduleTime} onChange={e=>setContinuous({...continuous,scheduleTime:e.target.value})}/></label>}{continuous.loopType==="主动制"&&<><label className="wide">事件源<select value={continuous.watchSourceType} onChange={e=>setContinuous({...continuous,watchSourceType:e.target.value,watchSourceRef:""})}><option value="free">通用观察（AI 依据任务目标判断）</option><option value="data_source">指定数据源（周期检查最新采集结果）</option><option value="inbound_message">渠道消息（收到飞书/钉钉/企微消息时评估）</option></select></label>{continuous.watchSourceType==="data_source"&&<label>监测数据源<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择数据源</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select></label>}{continuous.watchSourceType==="inbound_message"&&<label>监听平台<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择平台</option>{connectors.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}{continuous.watchSourceType!=="inbound_message"&&<label>检查间隔（分钟）<input type="number" min="1" max="1440" value={continuous.checkInterval} onChange={e=>setContinuous({...continuous,checkInterval:e.target.value})}/></label>}<label className="wide">触发条件<textarea required value={continuous.triggerCondition} onChange={e=>setContinuous({...continuous,triggerCondition:e.target.value})} placeholder="用一句话描述什么情况下该触发。例如：出现客户投诉或负面反馈；或某指标较上次明显下降。"/></label></>}<label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>确认并创建 →</button></div></form>}
         </section>
         <aside className={`insightPanel ${insightCollapsed?"collapsed":""}`}><div className="insightTitle"><h3>当前运行状态</h3><button type="button" onClick={()=>setInsightCollapsed(value=>!value)} title={insightCollapsed?"展开运行状态":"收起运行状态"}>{insightCollapsed?<ChevronLeftIcon style={{ width: 12, height: 12 }} />:<ChevronRightIcon style={{ width: 12, height: 12 }} />}<span>{insightCollapsed?"展开":"收起"}</span></button></div>{!insightCollapsed&&<><div className="controlCard"><span>身份权限</span><b>{role}</b></div><div className="controlCard"><span>企业资料</span><b>{docs.length} 份</b></div><div className="controlCard"><span>审计记录</span><b>{logs.length} 条</b></div><button className="viewAudit" onClick={() => setTab("logs")}>查看审计记录 →</button></>}</aside>
       </div>}
@@ -1105,14 +1178,14 @@ ${content}`,
             <div className="sideBlock">
               <h2>沉淀中心</h2>
             </div>
-            <ArtifactUploadPanel onDone={loadArtifacts} setNotice={setNotice}/>
+            <ArtifactUploadPanel onDone={() => { loadArtifacts(); loadArtifactResources(); }} setNotice={setNotice}/>
             <div className="sideBlock metricsBlock">
-              <article><span>可复用沉淀</span><b>{artifacts.length}</b></article>
-              <article><span>Markdown</span><b>{artifacts.filter(a => a.artifactType === "markdown").length}</b></article>
-              <article><span>Skill</span><b>{artifacts.filter(a => a.artifactType === "skill").length}</b></article>
+              <article><span>可复用沉淀</span><b>{artifactCounts.total}</b></article>
+              <article><span>Markdown</span><b>{artifactCounts.markdown}</b></article>
+              <article><span>Skill</span><b>{artifactCounts.skill}</b></article>
             </div>
             {appRole === "管理员" && <div className="sideBlock filterBlock">
-              <label>按用户筛选<select value={artifactOwner} onChange={event => setArtifactOwner(event.target.value)}><option>全部用户</option>{Array.from(new Set(artifacts.map(item => item.ownerEmail))).map(owner => <option key={owner}>{owner}</option>)}</select></label>
+              <label>按用户筛选<select value={artifactOwner} onChange={event => { setArtifactOwner(event.target.value); loadArtifacts(1, event.target.value); }}><option>全部用户</option>{artifactOwners.map(owner => <option key={owner}>{owner}</option>)}</select></label>
             </div>}
             {!!visibleArtifacts.length && <div className="sideBlock bulkBlock">
               <span>批量操作</span>
@@ -1123,7 +1196,7 @@ ${content}`,
           <main className="artifactsMain">
             <div className="artifactsHeader">
               <h2>{appRole === "管理员" ? "企业沉淀" : "我的沉淀"}</h2>
-              <small>{artifacts.length} 项 · 按更新时间倒序</small>
+              <small>{artifactsTotal} 项 · 按更新时间倒序</small>
             </div>
             <div className="artifactGrid">{visibleArtifacts.map(item => <article className="artifactCard" key={item.id}>
               <div className="cardColorBar" data-type={item.artifactType}/>
@@ -1146,7 +1219,8 @@ ${content}`,
                 <button className="dangerLink" onClick={() => deleteArtifact(item)}>删除</button>
               </div>
             </article>)}</div>
-            {!artifacts.length && <div className="emptyState big">
+            <Pager page={artifactsPage} pageSize={ARTIFACTS_PAGE_SIZE} total={artifactsTotal} onChange={next => loadArtifacts(next)} />
+            {!artifactsTotal && <div className="emptyState big">
               <b>还没有沉淀内容</b>
               <small>把对话整理为 Markdown 或 Skill，或在左侧拖入 .md / .skill / .txt 文件开始沉淀。</small>
             </div>}
@@ -1165,7 +1239,7 @@ ${content}`,
 
       {tab === "agents" && <AgentsPanel agents={agents} agentRuns={agentRuns} activeAgent={activeAgent} selectedAgentIds={selectedAgentIds} setSelectedAgentIds={setSelectedAgentIds} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} setModalType={setModalType} agentSettings={agentSettings} startAgent={startAgent} deleteModule={deleteModule} deleteSelectedModules={deleteSelectedModules} loadModules={loadModules} />}
 
-      {tab === "workflows" && <WorkflowsPanel workflows={workflows} workflowRuns={workflowRuns} selectedWorkflowIds={selectedWorkflowIds} runWorkflow={runWorkflow} runningWorkflow={runningWorkflow} setRunningWorkflow={setRunningWorkflow} runInput={runInput} selectedRun={selectedRun} setModalType={setModalType} setSelectedWorkflowIds={setSelectedWorkflowIds} setRunWorkflow={setRunWorkflow} setRunInput={setRunInput} setSelectedRun={setSelectedRun} chooseWorkflowTemplate={chooseWorkflowTemplate} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} deleteSelectedModules={deleteSelectedModules} runModule={runModule} deleteModule={deleteModule} loadModules={loadModules} setNotice={setNotice} loadState={loadState} loadGovernance={loadGovernance} loadArtifacts={loadArtifacts} />}
+      {tab === "workflows" && <WorkflowsPanel workflows={workflows} workflowRuns={workflowRuns} selectedWorkflowIds={selectedWorkflowIds} runWorkflow={runWorkflow} runningWorkflow={runningWorkflow} setRunningWorkflow={setRunningWorkflow} runInput={runInput} selectedRun={selectedRun} setModalType={setModalType} setSelectedWorkflowIds={setSelectedWorkflowIds} setRunWorkflow={setRunWorkflow} setRunInput={setRunInput} setSelectedRun={setSelectedRun} chooseWorkflowTemplate={chooseWorkflowTemplate} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} deleteSelectedModules={deleteSelectedModules} runModule={runModule} deleteModule={deleteModule} loadModules={loadModules} setNotice={setNotice} loadState={loadState} loadGovernance={loadGovernance} loadArtifacts={async () => { await Promise.all([loadArtifacts(), loadArtifactResources()]); }} />}
 
       {tab === "data" && <CollectionPanel sources={sources} collectionRuns={collectionRuns} selectedSourceIds={selectedSourceIds} selectedCollectionRunIds={selectedCollectionRunIds} selectedCollectionRun={selectedCollectionRun} runningSourceId={runningSourceId} cleaningRules={cleaningRules} cleanedPreview={cleanedPreview} showCleaning={showCleaning} localCleaningFile={localCleaningFile} localCleaningBusy={localCleaningBusy} setSelectedSourceIds={setSelectedSourceIds} setSelectedCollectionRunIds={setSelectedCollectionRunIds} setSelectedCollectionRun={setSelectedCollectionRun} setRunningSourceId={setRunningSourceId} setCleaningRules={setCleaningRules} setCleanedPreview={setCleanedPreview} setShowCleaning={setShowCleaning} setLocalCleaningFile={setLocalCleaningFile} setLocalCleaningBusy={setLocalCleaningBusy} setCollectionRuns={setCollectionRuns} setNotice={setNotice} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} runModule={runModule} deleteModule={deleteModule} deleteSelectedModules={deleteSelectedModules} loadModules={loadModules} loadState={loadState} loadPersonalKnowledge={loadPersonalKnowledge} deleteBatch={deleteBatch} modelModeLabel={modelModeLabel} newSourceTask={newSourceTask} openSourceEditor={openSourceEditor} />}
 
@@ -1245,7 +1319,7 @@ ${content}`,
         <section><h3>4. 可调用能力</h3><div className="capabilityGrid">{[["knowledge","检索企业知识","读取当前账号有权限的知识"],["workflow","运行工作流","把任务交给已配置流程"],["data","数据采集","查看采集源与运行状态"],["approval","发起审批","高风险动作提交指定审批人"],["artifacts","调用沉淀","使用个人 Markdown 和 Skill"],["connectors","平台接入","在授权范围内使用飞书、钉钉、企微"]].map(([key,title,desc])=><label key={key}><input type="checkbox" name={`capability_${key}`} defaultChecked={key==="knowledge"||key==="artifacts"}/><span><b>{title}</b><small>{desc}</small></span></label>)}</div></section>
         <section><h3>5. 运行与发布</h3><div className="agentFormGrid"><label>记忆方式<select name="memoryMode"><option>仅当前会话</option><option>允许读取个人沉淀</option><option>无记忆模式</option></select></label><label>审批规则<select name="approvalMode"><option>高风险操作需审批</option><option>所有外部动作需审批</option><option>仅查询不执行动作</option></select></label><label>使用场景<select name="usageScope"><option>企业内部</option><option>指定岗位</option><option>外部客户服务</option></select></label><label>发布到<select name="publishTarget"><option>智能助手</option><option>飞书机器人</option><option>钉钉机器人</option><option>企业微信机器人</option></select></label></div></section>
       </div>}
-      {modalType==="workflow" && <><div className="templatePicker"><b>先选一个模板</b><div>{(["宣传","会议","客户","自定义"] as const).map(x=><button type="button" key={x} onClick={()=>chooseWorkflowTemplate(x)}>{x==="宣传"?"企业宣传":x==="会议"?"会议纪要":x==="客户"?"客户跟进":"从空白开始"}</button>)}</div></div><label>触发方式<select name="triggerType"><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>新增业务记录</option></select></label><div className="builder"><div className="builderHead"><div><b>执行步骤</b><small>第一步组织任务，随后分发给顺序或并行AI</small></div><span className="builderLegend"><i/>并行AI任务</span></div>{workflowNodes.map((node,index)=><div className={`builderNode ${node.parallelGroup?"parallelNode":""} ${node.type==="input"?"inputBuilderNode":""}`} key={node.id}><b>{node.parallelGroup?"并":index+1}</b><select value={node.type} disabled={!!node.parallelGroup} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,type:e.target.value as WorkflowNode["type"],config:""}:x))}><option value="input">接收输入</option><option value="knowledge">知识检索</option><option value="agent">调用智能体</option><option value="data">运行数据采集</option><option value="ai">AI处理</option><option value="review">质量审查</option><option value="approval">人工审批</option><option value="save">保存沉淀</option><option value="output">输出结果</option></select><input value={node.name} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,name:e.target.value}:x))}/>{(node.type==="input"||node.type==="ai")&&<div className="workflowInputSource"><div className="inputModeTabs"><button type="button" className={(node.inputMode||"prompt")==="prompt"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"prompt"})}>提示词结构</button><button type="button" className={node.inputMode==="markdown"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"markdown"})}>调用 Markdown</button><button type="button" className={node.inputMode==="skill"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"skill"})}>调用 Skill</button><button type="button" className={node.inputMode==="direct"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"direct"})}>直接提需求</button></div>{(node.inputMode||"prompt")==="prompt"?<div className="promptStructureGrid">{([["role","角色 Role","例如：资深市场顾问"],["task","任务 Task","需要完成的核心任务"],["context","上下文 Context","业务背景、已有资料"],["constraint","约束 Constraint","不能做什么、字数、范围"],["format","格式 Format","表格、报告、Markdown等"],["example","示例 Example","期望结果示例"]] as Array<[keyof PromptGuide,string,string]>).map(([field,label,placeholder])=><label key={field}>{label}<input value={node.promptGuide?.[field]||""} onChange={e=>updatePromptField(node.id,field,e.target.value)} placeholder={placeholder}/></label>)}</div>:(node.inputMode==="direct"?<label className="workflowResourceSelect workflowDirectRequest">直接填写需求<textarea rows={5} value={node.config||""} onChange={e=>updateWorkflowInput(node.id,{config:e.target.value})} placeholder="直接写一句业务需求，例如：把客户反馈整理成问题清单，并给出优先级和下一步动作。"/><small>适合不想拆角色、任务、上下文时使用；执行时会把这段需求直接交给当前步骤。</small></label>:<label className="workflowResourceSelect">从我的沉淀中心选择{node.inputMode==="skill"?" Skill":" Markdown"}<select value={node.resourceTitle?String(artifacts.find(item=>item.title===node.resourceTitle&&item.artifactType===node.inputMode)?.id||""):""} onChange={e=>selectWorkflowResource(node.id,e.target.value,node.inputMode as "markdown"|"skill")}><option value="">请选择已保存内容</option>{artifacts.filter(item=>item.artifactType===node.inputMode).map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select><small>{node.resourceTitle?`已选：${node.resourceTitle}`:`还没有可用内容时，请先到沉淀中心保存一个${node.inputMode==="skill"?" Skill":" .md 文件"}`}</small></label>)}</div>}{node.type==="agent"&&<label className="workflowResourceSelect">选择已启用智能体<select value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))}><option value="">请选择智能体</option>{agents.filter(item=>item.status==="已启用").map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select></label>}{node.type==="data"&&<label className="workflowResourceSelect">选择数据源<select value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))}><option value="">请选择数据源</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select><small>运行后先进入采集审核，不会绕过数据清洗和入库确认。</small></label>}{!["input","ai","agent","data","output","save","approval"].includes(node.type)&&<input className="wide" value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))} placeholder={node.type==="review"?"填写审查标准":"说明这一步要做什么"}/>} { ["ai","review","agent"].includes(node.type)&&<label className="workflowResourceSelect compactModelSelect">本步骤模型<select value={node.modelMode||"auto"} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,modelMode:e.target.value}:x))}>{modelModeOptions}</select><small>指定后，本步骤优先使用这个模型；不选则自动选择。</small></label>}<button type="button" disabled={workflowNodes.length<=2} onClick={()=>setWorkflowNodes(items=>items.filter(x=>x.id!==node.id))}>×</button>{node.parallelGroup&&workflowNodes[index+1]?.parallelGroup!==node.parallelGroup&&<button type="button" className="addBranchButton" onClick={()=>addParallelBranch(node.parallelGroup!,node.id)}><PlusIcon style={{ width: 12, height: 12 }} /> 增加一个并行AI任务</button>}{index<workflowNodes.length-1&&<i>{node.parallelGroup&&workflowNodes[index+1]?.parallelGroup===node.parallelGroup?<PlusIcon style={{ width: 12, height: 12 }} />:"↓"}</i>}</div>)}<div className="builderAddActions"><button type="button" className="addNode" onClick={addWorkflowNode}><PlusIcon style={{ width: 12, height: 12 }} /> 添加顺序步骤</button><button type="button" className="addNode parallelAdd" onClick={addParallelGroup}>⑂ 在第一步后添加并行AI组</button></div><p className="parallelHint">流程可直接连接：聊天任务、企业/个人知识、Markdown、Skill、智能体、数据采集、并行AI、质量审查、审批、沉淀和结果回传。</p></div></>}
+      {modalType==="workflow" && <><div className="templatePicker"><b>先选一个模板</b><div>{(["宣传","会议","客户","自定义"] as const).map(x=><button type="button" key={x} onClick={()=>chooseWorkflowTemplate(x)}>{x==="宣传"?"企业宣传":x==="会议"?"会议纪要":x==="客户"?"客户跟进":"从空白开始"}</button>)}</div></div><label>触发方式<select name="triggerType"><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>新增业务记录</option></select></label><div className="builder"><div className="builderHead"><div><b>执行步骤</b><small>第一步组织任务，随后分发给顺序或并行AI</small></div><span className="builderLegend"><i/>并行AI任务</span></div>{workflowNodes.map((node,index)=><div className={`builderNode ${node.parallelGroup?"parallelNode":""} ${node.type==="input"?"inputBuilderNode":""}`} key={node.id}><b>{node.parallelGroup?"并":index+1}</b><select value={node.type} disabled={!!node.parallelGroup} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,type:e.target.value as WorkflowNode["type"],config:""}:x))}><option value="input">接收输入</option><option value="knowledge">知识检索</option><option value="agent">调用智能体</option><option value="data">运行数据采集</option><option value="ai">AI处理</option><option value="review">质量审查</option><option value="approval">人工审批</option><option value="save">保存沉淀</option><option value="output">输出结果</option></select><input value={node.name} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,name:e.target.value}:x))}/>{(node.type==="input"||node.type==="ai")&&<div className="workflowInputSource"><div className="inputModeTabs"><button type="button" className={(node.inputMode||"prompt")==="prompt"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"prompt"})}>提示词结构</button><button type="button" className={node.inputMode==="markdown"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"markdown"})}>调用 Markdown</button><button type="button" className={node.inputMode==="skill"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"skill"})}>调用 Skill</button><button type="button" className={node.inputMode==="direct"?"active":""} onClick={()=>updateWorkflowInput(node.id,{inputMode:"direct"})}>直接提需求</button></div>{(node.inputMode||"prompt")==="prompt"?<div className="promptStructureGrid">{([["role","角色 Role","例如：资深市场顾问"],["task","任务 Task","需要完成的核心任务"],["context","上下文 Context","业务背景、已有资料"],["constraint","约束 Constraint","不能做什么、字数、范围"],["format","格式 Format","表格、报告、Markdown等"],["example","示例 Example","期望结果示例"]] as Array<[keyof PromptGuide,string,string]>).map(([field,label,placeholder])=><label key={field}>{label}<input value={node.promptGuide?.[field]||""} onChange={e=>updatePromptField(node.id,field,e.target.value)} placeholder={placeholder}/></label>)}</div>:(node.inputMode==="direct"?<label className="workflowResourceSelect workflowDirectRequest">直接填写需求<textarea rows={5} value={node.config||""} onChange={e=>updateWorkflowInput(node.id,{config:e.target.value})} placeholder="直接写一句业务需求，例如：把客户反馈整理成问题清单，并给出优先级和下一步动作。"/><small>适合不想拆角色、任务、上下文时使用；执行时会把这段需求直接交给当前步骤。</small></label>:<label className="workflowResourceSelect">从我的沉淀中心选择{node.inputMode==="skill"?" Skill":" Markdown"}<select value={node.resourceTitle?String(artifactResources.find(item=>item.title===node.resourceTitle&&item.artifactType===node.inputMode)?.id||""):""} onChange={e=>selectWorkflowResource(node.id,e.target.value,node.inputMode as "markdown"|"skill")}><option value="">请选择已保存内容</option>{artifactResources.filter(item=>item.artifactType===node.inputMode).map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select><small>{node.resourceTitle?`已选：${node.resourceTitle}`:`还没有可用内容时，请先到沉淀中心保存一个${node.inputMode==="skill"?" Skill":" .md 文件"}`}</small></label>)}</div>}{node.type==="agent"&&<label className="workflowResourceSelect">选择已启用智能体<select value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))}><option value="">请选择智能体</option>{agents.filter(item=>item.status==="已启用").map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select></label>}{node.type==="data"&&<label className="workflowResourceSelect">选择数据源<select value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))}><option value="">请选择数据源</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select><small>运行后先进入采集审核，不会绕过数据清洗和入库确认。</small></label>}{!["input","ai","agent","data","output","save","approval"].includes(node.type)&&<input className="wide" value={node.config||""} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,config:e.target.value}:x))} placeholder={node.type==="review"?"填写审查标准":"说明这一步要做什么"}/>} { ["ai","review","agent"].includes(node.type)&&<label className="workflowResourceSelect compactModelSelect">本步骤模型<select value={node.modelMode||"auto"} onChange={e=>setWorkflowNodes(items=>items.map(x=>x.id===node.id?{...x,modelMode:e.target.value}:x))}>{modelModeOptions}</select><small>指定后，本步骤优先使用这个模型；不选则自动选择。</small></label>}<button type="button" disabled={workflowNodes.length<=2} onClick={()=>setWorkflowNodes(items=>items.filter(x=>x.id!==node.id))}>×</button>{node.parallelGroup&&workflowNodes[index+1]?.parallelGroup!==node.parallelGroup&&<button type="button" className="addBranchButton" onClick={()=>addParallelBranch(node.parallelGroup!,node.id)}><PlusIcon style={{ width: 12, height: 12 }} /> 增加一个并行AI任务</button>}{index<workflowNodes.length-1&&<i>{node.parallelGroup&&workflowNodes[index+1]?.parallelGroup===node.parallelGroup?<PlusIcon style={{ width: 12, height: 12 }} />:"↓"}</i>}</div>)}<div className="builderAddActions"><button type="button" className="addNode" onClick={addWorkflowNode}><PlusIcon style={{ width: 12, height: 12 }} /> 添加顺序步骤</button><button type="button" className="addNode parallelAdd" onClick={addParallelGroup}>⑂ 在第一步后添加并行AI组</button></div><p className="parallelHint">流程可直接连接：聊天任务、企业/个人知识、Markdown、Skill、智能体、数据采集、并行AI、质量审查、审批、沉淀和结果回传。</p></div></>}
       {modalType==="source" && <>
         <div className="builderSection">
           <b>1. 数据从哪里来</b>

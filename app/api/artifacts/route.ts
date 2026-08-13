@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { ADMIN_ROLE } from "../_roles";
 import { createApp, auth, success, fail } from "../_app";
+import { parsePageParams } from "../_pagination";
 
 export const runtime = "edge";
 
@@ -24,15 +25,51 @@ async function readDeleteIds(request: Request) {
 const app = createApp();
 app.use("*", auth());
 
-// GET /api/artifacts — 获取沉淀列表
+const ARTIFACT_COLS = "id,owner_email AS ownerEmail,title,artifact_type AS artifactType,source_type AS sourceType,content,config,created_at AS createdAt,updated_at AS updatedAt";
+
+// GET /api/artifacts — 沉淀列表
+// - ?scope=picker：返回当前用户自己的 markdown/skill 全量（含正文），供工作流构建器选择，天然按用户有界、不分页。
+// - 默认：服务端分页网格。管理员看全部（可选 ?owner 精确过滤单个用户），普通用户仅自己。
+//   返回 { artifacts: 当前页, total, page, pageSize, counts, owners }。
 app.get("*", async (c) => {
   const { user } = c.var;
   await ensureTables();
-  const query = user.role === ADMIN_ROLE
-    ? db.prepare("SELECT id,owner_email AS ownerEmail,title,artifact_type AS artifactType,source_type AS sourceType,content,config,created_at AS createdAt,updated_at AS updatedAt FROM saved_artifacts ORDER BY id DESC")
-    : db.prepare("SELECT id,owner_email AS ownerEmail,title,artifact_type AS artifactType,source_type AS sourceType,content,config,created_at AS createdAt,updated_at AS updatedAt FROM saved_artifacts WHERE owner_email=? ORDER BY id DESC").bind(user.email);
-  const result = await query.all();
-  return success({ artifacts: result.results || [] });
+  const url = new URL(c.req.url);
+  const isAdmin = user.role === ADMIN_ROLE;
+
+  if (url.searchParams.get("scope") === "picker") {
+    const result = await db.prepare(`SELECT ${ARTIFACT_COLS} FROM saved_artifacts WHERE owner_email=? AND artifact_type IN ('markdown','skill') ORDER BY id DESC`)
+      .bind(user.email).all();
+    return success({ artifacts: result.results || [] });
+  }
+
+  const { page, pageSize, offset } = parsePageParams(url);
+  // 普通用户强制只看自己；管理员默认看全部，可用 ?owner 精确过滤单个用户。
+  const ownerFilter = isAdmin ? (url.searchParams.get("owner") || "").trim() : user.email;
+  const where = ownerFilter ? "WHERE owner_email=?" : "";
+  const scopeBinds = ownerFilter ? [ownerFilter] : [];
+
+  const [pageResult, totalRow, countRows] = await Promise.all([
+    db.prepare(`SELECT ${ARTIFACT_COLS} FROM saved_artifacts ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
+      .bind(...scopeBinds, pageSize, offset).all(),
+    db.prepare(`SELECT COUNT(*) AS total FROM saved_artifacts ${where}`).bind(...scopeBinds).first<{ total: number }>(),
+    db.prepare(`SELECT artifact_type AS artifactType, COUNT(*) AS n FROM saved_artifacts ${where} GROUP BY artifact_type`)
+      .bind(...scopeBinds).all<{ artifactType: string; n: number }>(),
+  ]);
+
+  const total = totalRow?.total || 0;
+  const counts = { total, markdown: 0, skill: 0 };
+  for (const row of countRows.results || []) {
+    if (row.artifactType === "markdown") counts.markdown = row.n;
+    else if (row.artifactType === "skill") counts.skill = row.n;
+  }
+  // 管理员筛选下拉需要全量 owner 列表（按用户数有界）。
+  let owners: string[] = [];
+  if (isAdmin) {
+    const ownerRows = await db.prepare("SELECT DISTINCT owner_email AS ownerEmail FROM saved_artifacts ORDER BY owner_email").all<{ ownerEmail: string }>();
+    owners = (ownerRows.results || []).map(row => row.ownerEmail);
+  }
+  return success({ artifacts: pageResult.results || [], total, page, pageSize, counts, owners });
 });
 
 // POST /api/artifacts — 创建沉淀

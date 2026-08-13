@@ -384,6 +384,30 @@
   color: #60766e;
 }
 
+/* 分页控件（沉淀网格底部，观感对齐权限中心 pager，居中） */
+.pagerNav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.pagerNav button {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+.pagerNav button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.pagerIndicator {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
 /* 响应式 */
 @media (max-width: 980px) {
   .artifactsLayout {

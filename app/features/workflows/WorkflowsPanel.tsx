@@ -36,22 +36,44 @@ export interface WorkflowsPanelProps {
 export default function WorkflowsPanel({ workflows, workflowRuns, selectedWorkflowIds, runWorkflow, runningWorkflow, setRunningWorkflow, runInput, selectedRun, setModalType, setSelectedWorkflowIds, setRunWorkflow, setRunInput, setSelectedRun, chooseWorkflowTemplate, setAllSelectedIds, toggleSelectedId, deleteSelectedModules, runModule, deleteModule, loadModules, setNotice, loadState, loadGovernance, loadArtifacts }: WorkflowsPanelProps) {
   async function executeSelectedWorkflow() {
     if (!runWorkflow || !runInput.trim()) return setNotice("请先填写本次要处理的内容");
-    setRunningWorkflow(true); setNotice("工作流正在逐步执行…");
-    const response = await fetch("/api/modules", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({type:"run",module:"workflow",id:String(runWorkflow.id),name:runWorkflow.name,input:runInput}) });
-    const data = await response.json();
-    setRunningWorkflow(false);
-    if (!response.ok) return setNotice(data.error || "执行失败");
-    setRunWorkflow(null); setSelectedRun(data.run); setNotice(data.run.status==="已完成"?"工作流已逐步执行完成":data.run.status==="等待审批"?"已提交审批，流程暂停等待决定":"工作流执行失败，可查看原因后重试");
-    await Promise.all([loadModules(),loadState(),loadGovernance(),loadArtifacts()]);
+    setRunningWorkflow(true); setNotice("工作流正在逐步执行，持续任务可能需要一两分钟…");
+    try {
+      const response = await fetch("/api/modules", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({type:"run",module:"workflow",id:String(runWorkflow.id),name:runWorkflow.name,input:runInput}) });
+      // 504/网关超时返回的是 HTML，response.json() 会抛异常——用 .catch 兜住，避免卡在“执行中”。
+      const data = await response.json().catch(()=>null);
+      if (!response.ok || !data) {
+        setNotice((data && data.error) || "执行时间较长或连接中断，任务可能仍在后台完成，请在“最近运行”刷新查看结果。");
+        await loadModules().catch(()=>{});
+        return;
+      }
+      setRunWorkflow(null); setSelectedRun(data.run); setNotice(data.run.status==="已完成"?"工作流已逐步执行完成":data.run.status==="等待审批"?"已提交审批，流程暂停等待决定":"工作流执行失败，可查看原因后重试");
+      await Promise.all([loadModules(),loadState(),loadGovernance(),loadArtifacts()]);
+    } catch {
+      setNotice("执行时间较长或连接中断，任务可能仍在后台完成，请在“最近运行”刷新查看结果。");
+      await loadModules().catch(()=>{});
+    } finally {
+      setRunningWorkflow(false);
+    }
   }
 
   async function retryWorkflow(run: WorkflowRun) {
     setRunningWorkflow(true);
-    const response = await fetch("/api/modules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"retry",runId:String(run.id)})});
-    const data = await response.json(); setRunningWorkflow(false);
-    if (!response.ok) return setNotice(data.error||"重试失败");
-    setSelectedRun(data.run); setNotice(data.run.status==="已完成"?"重新运行成功":"重新运行结束，请查看步骤");
-    await loadModules();
+    try {
+      const response = await fetch("/api/modules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"retry",runId:String(run.id)})});
+      const data = await response.json().catch(()=>null);
+      if (!response.ok || !data) {
+        setNotice((data && data.error) || "执行时间较长或连接中断，任务可能仍在后台完成，请在“最近运行”刷新查看结果。");
+        await loadModules().catch(()=>{});
+        return;
+      }
+      setSelectedRun(data.run); setNotice(data.run.status==="已完成"?"重新运行成功":"重新运行结束，请查看步骤");
+      await loadModules();
+    } catch {
+      setNotice("执行时间较长或连接中断，任务可能仍在后台完成，请在“最近运行”刷新查看结果。");
+      await loadModules().catch(()=>{});
+    } finally {
+      setRunningWorkflow(false);
+    }
   }
 
   return <section className="contentPanel">

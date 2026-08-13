@@ -571,6 +571,13 @@ function CleanMediaPanel() {
   const [formKey, setFormKey] = useState(0);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  // 提示语分「普通/失败」两种色调：图片生成常常几百毫秒就被上游打回（如某模型无可用渠道），
+  // 失败若和成功共用同一个灰底提示，用户容易误以为「点了没反应」。失败用醒目红底区分。
+  const [messageTone, setMessageTone] = useState<"info" | "error">("info");
+  function showMessage(text: string, tone: "info" | "error" = "info") {
+    setMessage(text);
+    setMessageTone(tone);
+  }
   const [promptMode, setPromptMode] = useState<"structured" | "custom">("structured");
   const [optimizePrompt, setOptimizePrompt] = useState(false);
   const [textModelId, setTextModelId] = useState("");
@@ -597,25 +604,33 @@ function CleanMediaPanel() {
   ];
 
   async function loadAll() {
-    const [modelResponse, textResponse, imageResponse] = await Promise.all([
-      fetch("/api/image-models"),
-      fetch("/api/model"),
-      fetch("/api/image-generate"),
-    ]);
-    const modelData = await readResult(modelResponse);
-    const textData = await readResult(textResponse);
-    const imageData = await readResult(imageResponse);
-    const nextImageModels = modelData.models || [];
-    const nextTextModels = textData.connections || [];
-    setImageModels(nextImageModels);
-    setTextModels(nextTextModels);
-    setImages(imageData.images || []);
-    setSelectedModelId(current => current || (nextImageModels[0]?.id ? String(nextImageModels[0].id) : ""));
-    setTextModelId(current => current || (nextTextModels[0]?.id ? String(nextTextModels[0].id) : ""));
+    // 三个接口并发请求，但各自返回后立即渲染，互不阻塞。
+    // 此前用 Promise.all + 顺序 await，模型列表要等最慢的接口（已生成图片）
+    // 全部返回才显示，造成「模型列表加载慢」的错觉。现在模型列表一拿到就先出。
+    const modelPromise = fetch("/api/image-models")
+      .then(readResult)
+      .then(modelData => {
+        const nextImageModels = modelData.models || [];
+        setImageModels(nextImageModels);
+        setSelectedModelId(current => current || (nextImageModels[0]?.id ? String(nextImageModels[0].id) : ""));
+      });
+    const textPromise = fetch("/api/model")
+      .then(readResult)
+      .then(textData => {
+        const nextTextModels = textData.connections || [];
+        setTextModels(nextTextModels);
+        setTextModelId(current => current || (nextTextModels[0]?.id ? String(nextTextModels[0].id) : ""));
+      });
+    const imagePromise = fetch("/api/image-generate")
+      .then(readResult)
+      .then(imageData => {
+        setImages(imageData.images || []);
+      });
+    await Promise.all([modelPromise, textPromise, imagePromise]);
   }
 
   useEffect(() => {
-    void Promise.resolve().then(loadAll).catch(error => setMessage(error instanceof Error ? error.message : "图片模块加载失败。"));
+    void Promise.resolve().then(loadAll).catch(error => showMessage(error instanceof Error ? error.message : "图片模块加载失败。", "error"));
   }, []);
 
   function updateStructured(key: keyof typeof structured, value: string) {
@@ -639,7 +654,7 @@ function CleanMediaPanel() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setBusy("save-model");
-    setMessage("");
+    showMessage("");
     try {
       const response = await fetch("/api/image-models", {
         method: "POST",
@@ -655,12 +670,12 @@ function CleanMediaPanel() {
       });
       const result = await readResult(response);
       if (!response.ok) throw new Error(result.message || result.error || "图片模型保存失败。");
-      setMessage(result.message || "图片模型已保存。");
+      showMessage(result.message || "图片模型已保存。");
       setEditingModel(null);
       setFormKey(value => value + 1);
       await loadAll();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "图片模型保存失败。");
+      showMessage(error instanceof Error ? error.message : "图片模型保存失败。", "error");
     } finally {
       setBusy("");
     }
@@ -668,7 +683,7 @@ function CleanMediaPanel() {
 
   async function testImageModel(model: CleanImageModel) {
     setBusy(`test-${model.id}`);
-    setMessage("");
+    showMessage("");
     try {
       const response = await fetch("/api/image-models", {
         method: "POST",
@@ -677,9 +692,9 @@ function CleanMediaPanel() {
       });
       const result = await readResult(response);
       if (!response.ok) throw new Error(result.message || result.error || "图片模型测试失败。");
-      setMessage(result.message || "图片模型测试成功。");
+      showMessage(result.message || "图片模型测试成功。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "图片模型测试失败。");
+      showMessage(error instanceof Error ? error.message : "图片模型测试失败。", "error");
     } finally {
       setBusy("");
     }
@@ -691,11 +706,11 @@ function CleanMediaPanel() {
     try {
       const response = await deleteMany("/api/image-models", ids);
       const result = await readResult(response);
-      setMessage(result.message || `已删除 ${ids.length} 个图片模型。`);
+      showMessage(result.message || `已删除 ${ids.length} 个图片模型。`);
       setSelectedModels([]);
       await loadAll();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "删除图片模型失败。");
+      showMessage(error instanceof Error ? error.message : "删除图片模型失败。", "error");
     } finally {
       setBusy("");
     }
@@ -703,10 +718,10 @@ function CleanMediaPanel() {
 
   async function optimizeCurrentPrompt() {
     const prompt = sourcePrompt();
-    if (!prompt) return setMessage("请先填写提示词内容。");
-    if (!textModelId) return setMessage("请先选择一个用于优化提示词的大模型。");
+    if (!prompt) return showMessage("请先填写提示词内容。", "error");
+    if (!textModelId) return showMessage("请先选择一个用于优化提示词的大模型。", "error");
     setBusy("optimize");
-    setMessage("");
+    showMessage("");
     try {
       const response = await fetch("/api/image-prompt-optimize", {
         method: "POST",
@@ -718,9 +733,9 @@ function CleanMediaPanel() {
       const nextPrompt = result.optimizedPrompt || result.prompt || result.content || "";
       if (!nextPrompt) throw new Error("提示词优化没有返回内容，请更换优化模型或关闭优化开关。");
       setOptimizedPrompt(nextPrompt);
-      setMessage("提示词已优化，可以继续生成图片。");
+      showMessage("提示词已优化，可以继续生成图片。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "提示词优化失败。");
+      showMessage(error instanceof Error ? error.message : "提示词优化失败。", "error");
     } finally {
       setBusy("");
     }
@@ -728,11 +743,11 @@ function CleanMediaPanel() {
 
   async function generateImage() {
     const prompt = sourcePrompt();
-    if (!selectedModelId) return setMessage("请先保存并选择一个图片模型。");
-    if (!prompt) return setMessage("请先填写图片需求或自定义提示词。");
+    if (!selectedModelId) return showMessage("请先保存并选择一个图片模型。", "error");
+    if (!prompt) return showMessage("请先填写图片需求或自定义提示词。", "error");
     setBusy("generate");
     log.info("图片生成开始", { modelId: selectedModelId, promptLength: prompt.length, optimizePrompt, size: settings.size, count: settings.count });
-    setMessage(optimizePrompt ? "正在优化提示词并生成图片，请稍候。" : "正在生成图片，请稍候。");
+    showMessage(optimizePrompt ? "正在优化提示词并生成图片，请稍候。" : "正在生成图片，请稍候。");
     try {
       let finalPrompt = optimizedPrompt || prompt;
       if (optimizePrompt && !optimizedPrompt) {
@@ -764,7 +779,7 @@ function CleanMediaPanel() {
       const result = await readResult(response);
       if (!response.ok) throw new Error(result.message || result.error || "图片生成失败。");
       log.info("图片生成成功", { imagesCount: result.images?.length || 0 });
-      setMessage(result.message || "图片已生成，结果已保存到下方。");
+      showMessage(result.message || "图片已生成，结果已保存到下方。");
       if (Array.isArray(result.images) && result.images.length) {
         setImages(current => [...result.images, ...current.filter(item => !result.images.some((next: CleanGeneratedImage) => next.id === item.id))]);
       }
@@ -772,7 +787,12 @@ function CleanMediaPanel() {
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (error) {
       log.error("图片生成失败", { error: error instanceof Error ? error.message : String(error) });
-      setMessage(error instanceof Error ? error.message : "图片生成失败。");
+      const detail = error instanceof Error ? error.message : "图片生成失败。";
+      // 生图失败常是「该模型上游暂无可用渠道」这类外部问题，附上可操作指引，避免用户误以为没反应、反复点。
+      const hint = /无可用渠道|distributor|渠道|502|not found|无效/i.test(detail)
+        ? "：该图片模型当前可能无法出图。请点模型旁的「测试」排查，或换一个图片模型再试。"
+        : "，请稍后重试或更换图片模型。";
+      showMessage(`图片没有生成成功${hint}\n原因：${detail}`, "error");
     } finally {
       setBusy("");
     }
@@ -784,11 +804,11 @@ function CleanMediaPanel() {
     try {
       const response = await deleteMany("/api/image-generate", ids);
       const result = await readResult(response);
-      setMessage(result.message || `已删除 ${ids.length} 条图片记录。`);
+      showMessage(result.message || `已删除 ${ids.length} 条图片记录。`);
       setSelectedImages([]);
       await loadAll();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "删除图片记录失败。");
+      showMessage(error instanceof Error ? error.message : "删除图片记录失败。", "error");
     } finally {
       setBusy("");
     }
@@ -861,7 +881,7 @@ function CleanMediaPanel() {
             </div> : <label className="customPromptLabel">自定义提示词<textarea value={customPrompt} onChange={event => setCustomPrompt(event.target.value)} placeholder="直接输入完整生图提示词..." /></label>}
             <div className="rowActions"><button className="primaryButton optimizePromptButton" disabled={busy === "optimize"} onClick={optimizeCurrentPrompt}>{busy === "optimize" ? <><RefreshIcon style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> 优化中...</> : <><SparklesIcon style={{ width: 14, height: 14 }} /> 优化提示词</>}</button>{selectedModel && <span className="muted">当前使用：{selectedModel.provider} · {selectedModel.model}</span>}</div>
             {optimizedPrompt && <div className="softPanel"><b>优化后的提示词</b><pre>{optimizedPrompt}</pre></div>}
-            {message && <div className="softPanel">{message}</div>}
+            {message && <div className={messageTone === "error" ? "softPanel softPanelError" : "softPanel"}>{message}</div>}
           </div>
         </section>
 

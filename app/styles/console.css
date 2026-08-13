@@ -1182,7 +1182,7 @@ header {
 .mediaModelList {
   display: grid;
   gap: 10px;
-  max-height: 260px;
+  max-height: 180px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }

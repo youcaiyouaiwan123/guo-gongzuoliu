@@ -156,7 +156,9 @@ function textFromEventStream(raw: string) {
 // 模型接口没有超时就等于没有上限：对端卡住时请求会一直挂着，
 // 占满 Worker 并发额度，用户侧表现为页面一直转圈。
 // 文字与图片分开设阈值，图片生成本身就慢得多。
-const TEXT_MODEL_TIMEOUT_MS = 60_000;
+// 文字 110s：要略大于中转层的 90s（services/model-relay/server.mjs），
+// 这样上游偶发慢时由中转先掐断并回明确的「model relay timeout」，而不是应用侧先放弃、连接空占。
+const TEXT_MODEL_TIMEOUT_MS = 110_000;
 const IMAGE_MODEL_TIMEOUT_MS = 120_000;
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, label: string) {
@@ -215,43 +217,63 @@ export async function callModel(
   // This deployment intentionally routes every vendor/model through the same
   // OpenAI-compatible endpoint, so stored URLs cannot accidentally leak keys.
   const maxTokens = options.maxTokens || 1600;
-  const temperatureField = modelSupportsTemperature(connection.model)
-    ? { temperature: options.temperature ?? 0.2 }
-    : {};
+  const canSendTemperature = modelSupportsTemperature(connection.model) && !temperatureRejected.has(connection.model);
+  const temperatureField = canSendTemperature ? { temperature: options.temperature ?? 0.2 } : {};
 
   if (runtime.MODEL_RELAY_URL) {
-    const response = await fetchWithTimeout(runtime.MODEL_RELAY_URL, {
+    const relayBody = (withTemperature: boolean) => JSON.stringify({
+      apiKey: connection.apiKey,
+      model: connection.model,
+      messages,
+      max_tokens: maxTokens,
+      ...(withTemperature ? temperatureField : {}),
+    });
+    let sentTemperature = canSendTemperature;
+    let response = await fetchWithTimeout(runtime.MODEL_RELAY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey: connection.apiKey,
-        model: connection.model,
-        messages,
-        max_tokens: maxTokens,
-        ...temperatureField,
-      }),
+      body: relayBody(sentTemperature),
     }, TEXT_MODEL_TIMEOUT_MS, "模型中转服务");
-    const { payload, text } = await readPayload(response);
+    let { payload, text } = await readPayload(response);
+    if (!response.ok && sentTemperature && isTemperatureRejection(payload)) {
+      // 上游动态弃用了该模型的 temperature：记住并去掉 temperature 重试一次。
+      temperatureRejected.add(connection.model);
+      sentTemperature = false;
+      response = await fetchWithTimeout(runtime.MODEL_RELAY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: relayBody(false),
+      }, TEXT_MODEL_TIMEOUT_MS, "模型中转服务");
+      ({ payload, text } = await readPayload(response));
+    }
     if (!response.ok) {
       throw new Error(failure(payload, `模型中转服务返回 ${response.status}`));
     }
     return ensureText(text, "模型");
   }
 
-  const response = await fetchWithTimeout(`${apiBase(FIXED_MODEL_BASE_URL)}/chat/completions`, {
+  const directBody = (withTemperature: boolean) => JSON.stringify({
+    model: connection.model,
+    max_tokens: maxTokens,
+    ...(withTemperature ? temperatureField : {}),
+    messages,
+  });
+  const directFetch = (withTemperature: boolean) => fetchWithTimeout(`${apiBase(FIXED_MODEL_BASE_URL)}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${connection.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: connection.model,
-      max_tokens: maxTokens,
-      ...temperatureField,
-      messages,
-    }),
+    body: directBody(withTemperature),
   }, TEXT_MODEL_TIMEOUT_MS, "模型接口");
-  const { payload, text } = await readPayload(response);
+  let response = await directFetch(canSendTemperature);
+  let { payload, text } = await readPayload(response);
+  if (!response.ok && canSendTemperature && isTemperatureRejection(payload)) {
+    // 上游动态弃用了该模型的 temperature：记住并去掉 temperature 重试一次。
+    temperatureRejected.add(connection.model);
+    response = await directFetch(false);
+    ({ payload, text } = await readPayload(response));
+  }
   if (!response.ok) {
     throw new Error(failure(payload, `模型接口返回 ${response.status}`));
   }
@@ -318,6 +340,13 @@ function isGeminiNativeImageModel(model: string): boolean {
 // 新一代模型（GPT-5 系列、o 系列推理模型）不接受自定义 temperature，
 // 传入会被上游忽略并回 "temperature is deprecated" 警告。省略该参数始终安全
 // （模型使用自身默认值），因此这里据模型名判断，只对支持的模型发送 temperature。
+// 上游代理还会对部分（新版 Claude 等）模型动态弃用 temperature，模型名无法穷举；
+// 首次被拒后把模型名记进此集合，后续请求直接省略 temperature，避免每轮多打一次。
+const temperatureRejected = new Set<string>();
+function isTemperatureRejection(payload: unknown): boolean {
+  const message = failure(payload, "").toLowerCase();
+  return message.includes("temperature");
+}
 function modelSupportsTemperature(model: string): boolean {
   const name = model.toLowerCase().trim();
   // o 系列推理模型：o1 / o3 / o4-mini 等（注意 gpt-4o 不属于此列）
@@ -468,7 +497,7 @@ export async function callModelWithTools(
   } = {},
 ): Promise<{ text: string; toolCalls: ToolCallResult[] }> {
   const maxTokens = options.maxTokens || 3200;
-  const temperatureField = modelSupportsTemperature(connection.model)
+  let temperatureField = (modelSupportsTemperature(connection.model) && !temperatureRejected.has(connection.model))
     ? { temperature: options.temperature ?? 0.2 }
     : {};
   const maxToolCalls = options.maxToolCalls || 10;
@@ -476,7 +505,22 @@ export async function callModelWithTools(
   let currentMessages = [...messages];
 
   for (let round = 0; round < maxToolCalls; round++) {
-    const response = await fetchWithTimeout(
+    const requestBody = () => JSON.stringify({
+      model: connection.model,
+      max_tokens: maxTokens,
+      ...temperatureField,
+      messages: currentMessages,
+      tools: tools.map(t => ({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters as Record<string, unknown>,
+        },
+      })),
+      tool_choice: "auto",
+    });
+    const runFetch = () => fetchWithTimeout(
       `${apiBase(FIXED_MODEL_BASE_URL)}/chat/completions`,
       {
         method: "POST",
@@ -484,27 +528,21 @@ export async function callModelWithTools(
           Authorization: `Bearer ${connection.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: connection.model,
-          max_tokens: maxTokens,
-          ...temperatureField,
-          messages: currentMessages,
-          tools: tools.map(t => ({
-            type: "function",
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.parameters as Record<string, unknown>,
-            },
-          })),
-          tool_choice: "auto",
-        }),
+        body: requestBody(),
       },
       TEXT_MODEL_TIMEOUT_MS,
       "模型接口",
     );
+    let response = await runFetch();
 
-    const { payload, text } = await readPayload(response);
+    let { payload, text } = await readPayload(response);
+    if (!response.ok && "temperature" in temperatureField && isTemperatureRejection(payload)) {
+      // 上游动态弃用了该模型的 temperature：记住并去掉 temperature 重试一次。
+      temperatureRejected.add(connection.model);
+      temperatureField = {};
+      response = await runFetch();
+      ({ payload, text } = await readPayload(response));
+    }
     if (!response.ok) {
       throw new Error(failure(payload, `模型接口返回 ${response.status}`));
     }

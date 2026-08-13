@@ -14,7 +14,6 @@ bash deploy/server-install.sh /path/to/haixin-ai-source.tar.gz
 
 - 解压当前版本到 `/opt/haixin-ai/releases/<版本号>`；
 - 创建并长期保留 `/opt/haixin-ai/shared/.env`；
-- 首次创建管理员 Basic Auth 账户（默认用户名 `admin`，默认密码 `admin`，首次登录后请修改）；
 - 创建 Docker 数据卷并构建前端、后端、模型中转和通道网关；
 - 将 `/opt/haixin-ai/current` 指向刚发布的版本；
 - 输出当前容器状态和访问地址。
@@ -43,11 +42,11 @@ docker compose --env-file /opt/haixin-ai/shared/.env -f docker-compose.server.ym
 docker compose --env-file /opt/haixin-ai/shared/.env -f docker-compose.server.yml logs --tail=100 channel-gateway
 ```
 
-网页默认通过服务器 80 端口访问；通道网关监听 8788 端口。生产环境建议在云防火墙中只开放 80/443，8788 仅允许内部或受信来源访问。
+网页默认通过服务器 80 端口访问，直接进入应用自身的登录页（企业用户 / 管理员登录）；nginx 不再叠加 Basic Auth。通道网关监听 8788 端口。生产环境建议在云防火墙中只开放 80/443，8788 仅允许内部或受信来源访问。
 
 ## 更新代码
 
-上传新的完整源码包后再次执行一键安装命令。脚本会保留共享 `.env`、管理员密码文件和 Docker 数据卷，不会覆盖已保存的模型、平台凭证及业务数据。
+上传新的完整源码包后再次执行一键安装命令。脚本会保留共享 `.env` 和 Docker 数据卷，不会覆盖已保存的模型、平台凭证及业务数据。
 
 ## 回滚
 

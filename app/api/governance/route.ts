@@ -22,7 +22,19 @@ const defaults = catalog.flatMap(item => [
   [STAFF_ROLE, item.key, item.employee],
 ] as [string, CapabilityKey, Decision][]);
 
-async function ensureSchema() {
+// schema 建表+播种较重，进程内只需跑一次；后续请求直接复用同一 Promise。
+// 失败则清空以便下次请求重试。
+let schemaReady: Promise<void> | null = null;
+function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = ensureSchemaOnce().catch(error => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+async function ensureSchemaOnce() {
   await runtime.DB.batch([
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS approval_requests (id INTEGER PRIMARY KEY AUTOINCREMENT,requester TEXT NOT NULL,request_type TEXT NOT NULL,title TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT '待审批',approver TEXT,comment TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,decided_at TEXT)"),
     runtime.DB.prepare("CREATE TABLE IF NOT EXISTS role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT,role TEXT NOT NULL,capability TEXT NOT NULL,decision TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(role,capability))"),

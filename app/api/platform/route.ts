@@ -1,8 +1,10 @@
 import { env } from "cloudflare:workers";
-import { collectSource, runWorkflowById } from "../modules/route";
+import { collectSource, runWorkflowById, judgeTrigger } from "../modules/route";
 import { callModel, type ModelConnection } from "../_modelProvider";
 import { ensureColumn } from "../_schema";
+import { withinCooldown } from "../_schedule";
 import { createApp } from "../_app";
+import { decryptSecret } from "../_crypto";
 
 type Platform = "feishu" | "dingtalk" | "wecom";
 type RuntimeEnv = {
@@ -89,6 +91,15 @@ function platformLog(stage: string, data: Record<string, unknown> = {}) {
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status });
+}
+
+// 平台凭证/模型密钥统一走 _crypto 的对称解密（写入侧在 connectors/model 用 encryptSecret/encryptJson）。
+// 历史遗留：本文件曾直接引用未定义的 decryptWithPlatformKey，导致长连接凭证解密必抛错、
+// personalConnection 恒返回 null（表现为网关心跳/消息一律 404 connection not found）。
+async function decryptWithPlatformKey(payload: string): Promise<string> {
+  const text = await decryptSecret(payload);
+  if (text === null) throw new Error("平台凭证解密失败");
+  return text;
 }
 
 async function personalConnection(connectionKey: string | null, platform: Platform) {
@@ -349,6 +360,26 @@ async function identityForPlatform(platform: Platform, platformUserId: string, o
   return { email: `${platformUserId}@${platform}.local`, role: zh.staff, businessRole: zh.staff };
 }
 
+// 主动制"入站消息"车道：找出监听该平台的"收到消息"型主动制任务，
+// 对消息文本做 AI 触发判定，命中就以任务创建者身份跑对应工作流。冷却窗口内不重复触发。
+const INBOUND_PROACTIVE_COOLDOWN_MIN = 60;
+async function evaluateInboundProactive(platform: Platform, text: string) {
+  const tasks = await runtime.DB.prepare(
+    "SELECT id,name,created_by AS createdBy,trigger_condition AS triggerCondition,last_triggered_at AS lastTriggeredAt FROM workflows WHERE enabled=1 AND watch_source_type='inbound_message' AND watch_source_ref=? AND status<>'停用'",
+  ).bind(platform).all<{ id: number; name: string; createdBy: string; triggerCondition: string; lastTriggeredAt: string | null }>();
+  const now = new Date();
+  for (const task of tasks.results || []) {
+    if (!task.createdBy) continue;
+    if (withinCooldown(task.lastTriggeredAt, INBOUND_PROACTIVE_COOLDOWN_MIN, now)) continue;
+    const verdict = await judgeTrigger(task.createdBy, task.triggerCondition, `收到${platform}消息：${text}`);
+    if (!verdict.trigger) continue;
+    const creator = await connectionIdentity(task.createdBy);
+    await runWorkflowById(task.id, task.createdBy, creator.role, `【消息触发】${verdict.reason || task.triggerCondition}`, { sourceChannel: "主动触发" });
+    await runtime.DB.prepare("UPDATE workflows SET last_triggered_at=? WHERE id=?").bind(now.toISOString(), task.id).run();
+    await audit(task.createdBy, "主动触发工作流", task.name, zh.success, `渠道消息命中；依据：${verdict.reason || task.triggerCondition}`);
+  }
+}
+
 async function handleMessage(platform: Platform, platformUserId: string, text: string, eventId: string, ownerEmail?: string, modelMode = "auto") {
   await ensureSchema();
   const identity = await identityForPlatform(platform, platformUserId, ownerEmail);
@@ -360,6 +391,11 @@ async function handleMessage(platform: Platform, platformUserId: string, text: s
     await finish(eventId, reply);
     await audit(identity.email, zh.platformChat, platform, zh.success, text.slice(0, 500));
     platformLog("message.replied", { platform, eventId, replyLength: reply.length });
+    // 主动制入站消息车道（Lane B）：回复之后再评估该平台的"收到消息"型主动制任务，
+    // 命中就跑对应工作流。放在回复之后、且整段 try/catch，绝不影响机器人正常应答。
+    await evaluateInboundProactive(platform, text).catch(error => {
+      platformLog("proactive.failed", { platform, eventId, error: error instanceof Error ? error.message : String(error) });
+    });
     return reply;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -431,9 +467,9 @@ app.post("*", async (c) => {
     const connection = await personalConnection(connectionKey, platform);
     if (!connection) return json({ error: "connection not found" }, 404);
     if (connection.credentials.connectionMode !== "long_connection") return json({ error: "connection is not long_connection mode" }, 400);
-    const auth = request.headers.get("authorization") || "";
+    const auth = c.req.header("authorization") || "";
     if (auth !== `Bearer ${connection.credentials.callbackToken}`) return json({ error: "unauthorized" }, 403);
-    const payload = await request.json().catch(() => ({} as Record<string, unknown>));
+    const payload = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     if (payload.type === "gateway_heartbeat" || payload.kind === "gateway_heartbeat") {
       await ensureSchema();
       await saveGatewayStatus(connection.ownerEmail, platform, payload);

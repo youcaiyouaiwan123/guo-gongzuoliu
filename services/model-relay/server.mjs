@@ -26,7 +26,7 @@ async function handleModelRelay(request, response) {
 
   const result = await requestText(TARGET, {
     method: "POST",
-    timeout: 45000,
+    timeout: 90000,
     timeoutMessage: "model relay timeout",
     userAgent: "Haixin-Enterprise-Model-Relay/1.0",
     accept: "application/json,text/event-stream,*/*",
