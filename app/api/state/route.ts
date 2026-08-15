@@ -138,7 +138,13 @@ app.get("*", async (c) => {
   sql += " ORDER BY updated_at DESC,id DESC LIMIT 100";
 
   const documents = await runtime.DB.prepare(sql).bind(...bindings).all();
-  const logs = await runtime.DB.prepare("SELECT id,actor,action,resource,result,detail,created_at AS createdAt FROM audit_logs ORDER BY id DESC LIMIT 100").all();
+  // 审计日志属敏感数据：仅在通过 view_audit 能力校验时才返回，否则回落到空集合，
+  // 避免任何登录用户（含普通员工）经此接口读取全员操作轨迹。
+  // 删除侧本就已是管理员专属（见下方 DELETE），这里补齐读取侧的对称约束。
+  const auditDenied = await authorizeCapability(runtime.DB, user, "view_audit");
+  const logs = auditDenied
+    ? { results: [] as unknown[] }
+    : await runtime.DB.prepare("SELECT id,actor,action,resource,result,detail,created_at AS createdAt FROM audit_logs ORDER BY id DESC LIMIT 100").all();
   return success({ documents: documents.results || [], logs: logs.results || [] });
 });
 

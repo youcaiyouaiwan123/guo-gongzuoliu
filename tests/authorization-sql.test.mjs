@@ -178,6 +178,27 @@ test("普通员工不能删除他人的采集日志，管理员与本人可以",
   assert.equal(db.prepare("SELECT COUNT(*) AS total FROM data_collection_runs").get().total, 0);
 });
 
+test("查看审计日志必须经过 view_audit 能力校验，普通员工默认拿不到", async () => {
+  // 回归：GET /api/state 曾无条件把全员 audit_logs 返回给任何登录用户，
+  // 而 view_audit 对普通员工默认「拒绝」却从未被执法。此处锁定读取侧的能力校验。
+  const state = await source("app/api/state/route.ts");
+  const start = state.indexOf('app.get("*"');
+  const end = state.indexOf("\napp.post(", start);
+  assert.ok(start > -1 && end > start, "未能定位 state 路由的 GET 处理体。");
+  const body = state.slice(start, end);
+
+  const auditReadAt = body.indexOf("FROM audit_logs");
+  assert.ok(auditReadAt > -1, "GET 仍应在获得授权时读取 audit_logs。");
+  const guardAt = body.search(/authorizeCapability\(runtime\.DB,\s*user,\s*"view_audit"\)/);
+  assert.ok(guardAt > -1, "GET 返回审计日志前必须校验 view_audit 能力。");
+  assert.ok(guardAt < auditReadAt, "view_audit 能力校验必须早于 audit_logs 读取。");
+  assert.match(body, /results:\s*\[\]/, "校验未通过时必须回落到空审计日志，而不是照常查询全表。");
+
+  // 能力目录里 view_audit 对普通员工默认必须是「拒绝」，确保默认收紧。
+  const entries = await capabilityEntries();
+  assert.equal(entries.get("view_audit")?.employee, "拒绝", "view_audit 默认必须对普通员工拒绝。");
+});
+
 test("身份只来自会话 Cookie，可伪造的身份请求头已彻底移除", async () => {
   const auth = await source("app/api/_auth.ts");
   assert.doesNotMatch(auth, /headers\.get\("oai-authenticated-user-email"\)/, "认证不得再读取客户端可控的身份请求头。");
