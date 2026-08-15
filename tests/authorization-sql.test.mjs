@@ -44,8 +44,9 @@ async function databaseWith(...ddlNeedles) {
 async function capabilityEntries() {
   const text = await source("app/api/_capabilities.ts");
   const entries = new Map();
-  for (const match of text.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)",\s*employee:\s*"([^"]+)"\s*\}/g)) {
-    entries.set(match[1], { label: match[2], employee: match[3] });
+  // 能力条目可能带可选的 adminManaged 字段，正则容忍 employee 之后到 } 之间的额外内容。
+  for (const match of text.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)",\s*employee:\s*"([^"]+)"([^}]*)\}/g)) {
+    entries.set(match[1], { label: match[2], employee: match[3], adminManaged: /adminManaged:\s*true/.test(match[4]) });
   }
   assert.ok(entries.size > 0, "未能从 _capabilities.ts 解析出任何能力项。");
   return entries;
@@ -64,6 +65,32 @@ test("个人域能力项对普通员工默认允许，企业级能力项保持�
   assert.equal(entries.get("manage_models")?.employee, "拒绝");
   assert.equal(entries.get("manage_platform")?.employee, "拒绝");
   assert.equal(entries.get("manage_knowledge")?.employee, "需审批");
+});
+
+test("后端硬控制的能力标记为 adminManaged 且员工默认拒绝，manage_help 无后端已移除", async () => {
+  const entries = await capabilityEntries();
+
+  // 这些能力后端按角色硬控制（管理员专属或 owner-scoped），不经 role_permissions 逐项判定，
+  // 必须标记 adminManaged，权限中心才会锁定员工侧，避免「开关点了不生效」的误导。
+  for (const key of ["manage_organization", "manage_approvals", "manage_monitoring", "manage_models", "manage_platform", "external_send"]) {
+    const entry = entries.get(key);
+    assert.ok(entry, `能力目录必须包含 ${key}。`);
+    assert.equal(entry.adminManaged, true, `${key} 后端按角色硬控制，必须标记 adminManaged。`);
+    assert.equal(entry.employee, "拒绝", `${key} 员工侧应固定为拒绝，与后端硬控制一致。`);
+  }
+
+  // manage_help 没有任何后端路由承接，属于纯误导性开关，应从目录与分组彻底移除。
+  assert.equal(entries.get("manage_help"), undefined, "manage_help 无对应后端功能，必须从能力目录移除。");
+  const capabilities = await source("app/api/_capabilities.ts");
+  assert.doesNotMatch(capabilities, /manage_help/, "manage_help 不应再出现在能力目录或分组中。");
+
+  // 权限中心必须能识别 adminManaged，从而锁定这些开关。
+  const panel = await source("app/features/permissions/PermissionsPanel.tsx");
+  assert.match(panel, /adminManaged/, "权限中心必须消费 adminManaged 标记以锁定不可配置的能力。");
+
+  // governance 保存权限时，adminManaged 能力对员工必须被强制为拒绝，不能落库误导性策略。
+  const governance = await source("app/api/governance/route.ts");
+  assert.match(governance, /isAdminManaged/, "governance 必须对 adminManaged 能力强制固定员工侧决策。");
 });
 
 test("能力目录是叶子模块，且授权在缺少策略行时按目录默认值判定", async () => {

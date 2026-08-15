@@ -2,6 +2,11 @@
 // role_permissions 表只保存管理员在权限中心做出的覆盖，未被覆盖的能力按此处 employee 字段生效，
 // 因此新增能力项在既有数据库上不会因缺少策略行而被一律拒绝。
 // 本模块必须保持为叶子模块（不导入 _auth.ts），否则会与 authorizeCapability 形成循环依赖。
+//
+// adminManaged 标记：这些能力后端并不通过 role_permissions 逐项判定，而是在各自路由里
+// 按角色硬控制（管理员专属或 owner-scoped，如企业架构、审批处理、监控/模型/平台的企业级管理、
+// 外部平台发送）。权限中心对它们只读展示、不提供员工侧「允许/需审批」配置，以免出现
+// 「开关点了不生效」的误导——员工侧一律固定为「拒绝」，真正的控制在对应路由内。
 import { ADMIN_ROLE, STAFF_ROLE } from "./_roles";
 export const capabilityCatalog = [
   { key: "use_chat", label: "智能助手对话", employee: "允许" },
@@ -16,22 +21,21 @@ export const capabilityCatalog = [
   { key: "collect_data", label: "数据采集与清洗", employee: "允许" },
   { key: "export_data", label: "导出数据", employee: "拒绝" },
   { key: "submit_approval", label: "发起审批", employee: "允许" },
-  { key: "manage_approvals", label: "审批中心管理", employee: "需审批" },
-  { key: "manage_organization", label: "企业架构管理", employee: "需审批" },
+  { key: "manage_approvals", label: "审批中心管理", employee: "拒绝", adminManaged: true },
+  { key: "manage_organization", label: "企业架构管理", employee: "拒绝", adminManaged: true },
   { key: "manage_personal_models", label: "我的模型连接", employee: "允许" },
-  { key: "manage_models", label: "模型接入管理", employee: "拒绝" },
+  { key: "manage_models", label: "模型接入管理", employee: "拒绝", adminManaged: true },
   { key: "manage_personal_platform", label: "我的平台连接", employee: "允许" },
-  { key: "manage_platform", label: "平台接入管理", employee: "拒绝" },
-  { key: "external_send", label: "外部平台发送", employee: "拒绝" },
+  { key: "manage_platform", label: "平台接入管理", employee: "拒绝", adminManaged: true },
+  { key: "external_send", label: "外部平台发送", employee: "拒绝", adminManaged: true },
   { key: "manage_users", label: "用户与账号管理", employee: "拒绝" },
   { key: "view_audit", label: "查看审计日志", employee: "拒绝" },
   { key: "view_contracts", label: "查看合同中心", employee: "允许" },
   { key: "generate_contracts", label: "生成合同", employee: "允许" },
   { key: "manage_contract_templates", label: "管理合同模板", employee: "拒绝" },
   { key: "view_monitoring", label: "查看监控看板", employee: "允许" },
-  { key: "manage_monitoring", label: "管理监控看板", employee: "需审批" },
+  { key: "manage_monitoring", label: "管理监控看板", employee: "拒绝", adminManaged: true },
   { key: "use_media_generation", label: "图文视频生成", employee: "允许" },
-  { key: "manage_help", label: "维护使用说明", employee: "拒绝" },
 ] as const;
 
 // 能力项分组：定义给前端权限中心使用，决定展示顺序、分组标题与说明。
@@ -63,9 +67,9 @@ export const capabilityGroups = [
   },
   {
     id: "content",
-    title: "内容生成 & 帮助",
-    description: "图文视频生成、企业使用说明维护等与内容生产相关的能力。",
-    keys: ["use_media_generation", "manage_help"],
+    title: "内容生成",
+    description: "图文视频生成等与内容生产相关的能力。",
+    keys: ["use_media_generation"],
   },
 ] as const;
 
@@ -99,4 +103,9 @@ export type PermissionRole = Omit<typeof permissionRoles[number], never>;
 export function defaultDecisionFor(role: string, capability: string): Decision {
   if (role === ADMIN_ROLE) return "允许";
   return (capabilityCatalog.find(item => item.key === capability)?.employee as Decision) || "拒绝";
+}
+
+// 该能力是否由后端按角色硬控制、不接受权限中心的员工侧配置（见文件顶部 adminManaged 说明）。
+export function isAdminManaged(capability: string): boolean {
+  return capabilityCatalog.some(item => item.key === capability && "adminManaged" in item && item.adminManaged);
 }

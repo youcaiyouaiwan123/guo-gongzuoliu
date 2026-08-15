@@ -44,9 +44,10 @@ function buildGroups(raw: PermissionCapabilityGroup[]): CapabilityGroup[] {
 }
 
 function isRoleLocked(role: PermissionRoleSpec, capability: PermissionCapability) {
-  // 锁定角色（管理员）一律用 defaultDecision；某些能力键也强制默认（collect_data）。
+  // 锁定角色（管理员）一律用 defaultDecision；adminManaged 能力后端按角色硬控制，
+  // 员工侧也固定、不可逐项配置（企业架构/审批/监控/模型接入/平台接入/外部发送）。
   if (role.locked) return true;
-  return false;
+  return Boolean(capability.adminManaged);
 }
 
 function decisionFor(role: PermissionRoleSpec, capability: PermissionCapability, draft: string | undefined, stored: Permission[]) {
@@ -73,11 +74,15 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
   function permissionValue(roleName: string, capability: PermissionCapability) {
     const role = roles.find(item => item.key === roleName);
     if (role?.locked) return role.defaultDecision as Decision;
+    // adminManaged 能力对员工恒为「拒绝」（后端按角色硬控制），忽略草稿/库中可能残留的旧值。
+    if (capability.adminManaged) return "拒绝" as Decision;
     return (permissionDrafts[permissionKey(roleName, capability.key)] || permissions.find(item => item.role === roleName && item.capability === capability.key)?.decision || capability.employee) as Decision;
   }
 
   function setPermissionDraft(roleName: string, capability: PermissionCapability, decision: Decision) {
     const role = roles.find(item => item.key === roleName);
+    // adminManaged 能力不接受员工侧配置，任何写入（含整组/一键操作）都忽略。
+    if (capability.adminManaged && !role?.locked) return;
     setPermissionDrafts(current => ({
       ...current,
       [permissionKey(roleName, capability.key)]: role?.locked ? "允许" : decision,
@@ -88,7 +93,10 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
   function allowAllEmployeePermissions() {
     if (!editableRole) return;
     const next = buildPermissionDrafts(permissions, capabilityCatalog);
-    for (const capability of capabilityCatalog) next[permissionKey(editableRole.key, capability.key)] = "允许";
+    for (const capability of capabilityCatalog) {
+      if (capability.adminManaged) continue;
+      next[permissionKey(editableRole.key, capability.key)] = "允许";
+    }
     setPermissionDrafts(next);
     setPermissionDirty(true);
     setNotice(`已将所有「${editableRole.label}」权限置为「允许」`);
@@ -284,13 +292,15 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
             {!collapsed && <div className="permissionsGroupGrid">
               {items.map(capability => {
                 const decision = (editableRole ? permissionValue(editableRole.key, capability) : "拒绝") as Decision;
-                const lockedCapability = editableRole?.locked ?? false;
+                const adminManaged = Boolean(capability.adminManaged);
+                const lockedCapability = (editableRole?.locked ?? false) || adminManaged;
                 return <div key={capability.key} className={`permissionCard decision-${decision === "允许" ? "allow" : decision === "需审批" ? "review" : "deny"} ${lockedCapability ? "isLocked" : ""}`}>
                   <div className="permissionCardHead">
                     <strong>{capability.label}</strong>
-                    {lockedCapability && <span className="permissionLock">已固定</span>}
+                    {lockedCapability && <span className="permissionLock">{adminManaged ? "管理员固定" : "已固定"}</span>}
                   </div>
                   <code className="permissionCardKey">{capability.key}</code>
+                  {adminManaged && <small className="permissionCardNote">该能力由后端按角色控制（管理员专属或按数据归属），权限中心不提供员工侧配置。</small>}
                   <div className="permissionCardFooter">
                     <span className={`permissionDecisionBadge decision-${decision === "允许" ? "allow" : decision === "需审批" ? "review" : "deny"}`}>
                       <span className="permissionDecisionDot" />

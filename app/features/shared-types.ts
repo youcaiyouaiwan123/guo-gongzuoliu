@@ -25,7 +25,7 @@ export type ManagedUser = { email: string; role: string; createdAt: string };
 export type ApprovalRequest = { id: number; requester: string; requestType: string; title: string; reason: string; status: string; approverEmail: string; approver?: string; comment: string; workflowRunId?: number; workflowStepIndex?: number; createdAt: string };
 export type ApprovalTarget = { email: string; jobTitle: string; unitName: string; recommended: boolean };
 export type Permission = { id: number; role: string; capability: string; decision: string; updatedAt: string };
-export type PermissionCapability = { key: string; label: string; employee: string };
+export type PermissionCapability = { key: string; label: string; employee: string; adminManaged?: boolean };
 // 能力项分组元数据，由后端 /api/capabilities 注入；前端仅消费，避免硬编码标题/描述/keys。
 export type PermissionCapabilityGroup = { id: string; title: string; description: string; keys: string[] };
 // 权限中心里的角色规格（key/label/description/locked/defaultDecision），由后端下发。

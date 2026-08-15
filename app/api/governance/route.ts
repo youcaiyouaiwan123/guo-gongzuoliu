@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { createApp, auth, success, fail, ADMIN_ROLE, STAFF_ROLE, authorizeCapability } from "../_app";
 import { log } from "../_logger";
 import { resumeApprovedWorkflow } from "../modules/route";
-import { capabilityCatalog as catalog } from "../_capabilities";
+import { capabilityCatalog as catalog, isAdminManaged } from "../_capabilities";
 import { ensureColumn } from "../_schema";
 import { normalizeDecisionValue, normalizeRoleValue } from "../_auth";
 import type { CapabilityKey, Decision } from "../_capabilities";
@@ -214,7 +214,13 @@ app.post("*", async (c) => {
     if (!exists) return fail("权限项不存在。");
     // 此前这里对 collect_data 强制写「允许」，与 _auth.ts 的无条件放行构成双保险，
     // 使权限中心对该能力的任何设置都无法落库。现按管理员选择正常保存。
-    const decision = role === ADMIN_ROLE ? "允许" : normalizeDecisionValue(body.decision);
+    // adminManaged 能力（企业架构/审批/监控/模型接入/平台接入/外部发送）后端按角色硬控制，
+    // 权限中心不接受员工侧配置，这里忽略传入值、把员工固定写「拒绝」，避免存下误导性策略。
+    const decision = role === ADMIN_ROLE
+      ? "允许"
+      : isAdminManaged(capability)
+        ? "拒绝"
+        : normalizeDecisionValue(body.decision);
     await runtime.DB.prepare("INSERT INTO role_permissions(role,capability,decision,updated_at) VALUES(?,?,?,?) ON CONFLICT(role,capability) DO UPDATE SET decision=excluded.decision,updated_at=excluded.updated_at")
       .bind(role, capability, decision, now).run();
     await audit(user.email, "修改权限", `${role} · ${capability}`, "成功", decision);
@@ -237,7 +243,9 @@ app.post("*", async (c) => {
         capability: capability.key,
         decision: role === ADMIN_ROLE
           ? "允许"
-          : byKey.get(`${role}:${capability.key}`) || capability.employee,
+          : isAdminManaged(capability.key)
+            ? "拒绝"
+            : byKey.get(`${role}:${capability.key}`) || capability.employee,
       }))
     );
     await runtime.DB.batch(rows.map(item =>
