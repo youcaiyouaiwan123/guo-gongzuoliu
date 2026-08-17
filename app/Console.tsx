@@ -70,6 +70,7 @@ export default function Console({ userEmail, displayName }: { userEmail: string;
   const [askMode, setAskMode] = useState<"quick" | "guided" | "continuous">("quick");
   const [guide, setGuide] = useState({ role: "", task: "", context: "", constraint: "", format: "", example: "" });
   const [continuous, setContinuous] = useState({ name: "", loopType: "目标制", reviewMode: "明确标准", goal: "", triggerType: "手动触发", reviewStandard: "", stopCondition: "", maxLoops: "3", finalAction: "提交管理员审批", failureAction: "通知负责人", scheduleTime: "09:00", watchSourceType: "free", watchSourceRef: "", triggerCondition: "", checkInterval: "10", dataSourceRef: "" });
+  const [editingWorkflowId, setEditingWorkflowId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [personalKnowledge, setPersonalKnowledge] = useState<PersonalKnowledge[]>([]);
@@ -1040,6 +1041,40 @@ ${content}`,
     send(undefined, prompt);
   }
 
+  // 编辑已有持续任务：把工作流行回填到「自动任务」引导表单，并打开该表单。
+  // dataSourceRef 从 loop-data 节点反解；主动制·指定数据源时该源即 watchSourceRef，
+  // 留空让保存时自动复用，避免和事件源重复选。
+  function editWorkflow(w: Workflow) {
+    let dataSourceRef = "";
+    try {
+      const parsed = JSON.parse(w.steps || "[]") as WorkflowNode[];
+      const dataNode = Array.isArray(parsed) ? parsed.find(n => n.id === "loop-data") : null;
+      const fromNode = dataNode?.config || "";
+      dataSourceRef = (w.loopType === "主动制" && w.watchSourceType === "data_source") ? "" : fromNode;
+    } catch { dataSourceRef = ""; }
+    setContinuous({
+      name: w.name,
+      loopType: w.loopType || "目标制",
+      reviewMode: w.reviewMode || "明确标准",
+      goal: w.goal || "",
+      triggerType: w.triggerType || "手动触发",
+      reviewStandard: w.reviewStandard || "",
+      stopCondition: w.stopCondition || "",
+      maxLoops: String(w.maxLoops ?? 3),
+      finalAction: w.finalAction || "提交管理员审批",
+      failureAction: w.failureAction || "通知负责人",
+      scheduleTime: w.scheduleTime || "09:00",
+      watchSourceType: w.watchSourceType || "free",
+      watchSourceRef: w.watchSourceRef || "",
+      triggerCondition: w.triggerCondition || "",
+      checkInterval: String(w.checkIntervalMin ?? 10),
+      dataSourceRef,
+    });
+    setEditingWorkflowId(w.id);
+    setTab("chat");
+    setAskMode("continuous");
+  }
+
   async function createContinuousTask(event: FormEvent) {
     event.preventDefault();
     // 把用户填的目标/合格标准编译成"可执行的真节点"，而不是以前那串没有语义的箭头文字。
@@ -1065,6 +1100,7 @@ ${content}`,
     ];
     const response = await fetch("/api/modules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       type: "workflow", name: continuous.name, triggerType: continuous.triggerType, steps: JSON.stringify(nodes), goal: continuous.goal,
+      ...(editingWorkflowId ? { id: String(editingWorkflowId) } : {}),
       loopType: continuous.loopType, reviewMode: continuous.reviewMode, reviewStandard: continuous.reviewStandard,
       stopCondition: continuous.stopCondition, maxLoops: continuous.maxLoops, finalAction: continuous.finalAction,
       failureAction: continuous.failureAction, scheduleTime: continuous.loopType === "定时制" ? continuous.scheduleTime : "",
@@ -1074,18 +1110,23 @@ ${content}`,
       checkInterval: continuous.checkInterval,
     }) });
     const data = await response.json();
-    if (!response.ok) return setNotice(data.error || "持续任务创建失败");
+    if (!response.ok) return setNotice(data.error || (editingWorkflowId ? "持续任务更新失败" : "持续任务创建失败"));
     const wiredSource = Number(execSourceId) > 0 ? sources.find(item => String(item.id) === String(execSourceId)) : null;
     const dataNote = wiredSource ? `；运行时先采集数据源「${wiredSource.name}」` : "";
-    setNotice((continuous.loopType === "定时制"
-      ? `持续任务已创建，每天 ${continuous.scheduleTime}（北京时间）自动运行`
-      : continuous.loopType === "主动制"
-        ? (continuous.watchSourceType === "inbound_message"
-          ? "持续任务已创建；收到所选渠道消息时会自动评估并按条件触发"
-          : `持续任务已创建；每 ${continuous.checkInterval} 分钟检查一次事件源，命中触发条件即自动运行`)
-        : "持续任务已创建；该模式不会自动运行，需要在工作流中心手动触发") + dataNote);
+    if (editingWorkflowId) {
+      setNotice((data.message || "持续任务已更新。") + dataNote);
+    } else {
+      setNotice((continuous.loopType === "定时制"
+        ? `持续任务已创建，每天 ${continuous.scheduleTime}（北京时间）自动运行`
+        : continuous.loopType === "主动制"
+          ? (continuous.watchSourceType === "inbound_message"
+            ? "持续任务已创建；收到所选渠道消息时会自动评估并按条件触发"
+            : `持续任务已创建；每 ${continuous.checkInterval} 分钟检查一次事件源，命中触发条件即自动运行`)
+          : "持续任务已创建；该模式不会自动运行，需要在工作流中心手动触发") + dataNote);
+    }
     await Promise.all([loadModules(), loadState()]);
     setSaveDraft({ sourceType: "loop", title: continuous.name, content: loopMarkdown(), config: JSON.stringify(continuous) });
+    setEditingWorkflowId(null);
     setTab("workflows"); setAskMode("quick");
   }
 
@@ -1175,9 +1216,9 @@ ${content}`,
             <label><span>5. 希望怎么输出 <i>Format</i></span><input value={guide.format} onChange={e=>setGuide({...guide,format:e.target.value})} placeholder="例如：标题 + 正文 + 表格"/></label>
             <label><span>6. 有没有参考示例 <i>Example</i></span><input value={guide.example} onChange={e=>setGuide({...guide,example:e.target.value})} placeholder="例如：专业、简洁、类似公司公文"/></label>
           </div><div className="promptPreview"><b>系统将自动整理为完整提示词</b><p>{guide.task ? [guide.role,guide.task,guide.context,guide.constraint,guide.format,guide.example].filter(Boolean).join(" ｜ ") : "选择模板或填写任务后，这里会显示内容摘要。"}</p><button disabled={busy}>{busy?"正在生成…":"提交给企业助手 →"}</button></div></form> :
-          <form className="continuousGuide" onSubmit={createContinuousTask}><div className="guideIntro"><div><b>创建一个会持续工作的AI任务</b><p>选择运行方式和判断标准，确认后由自动化工作流托管。</p></div></div><div className="loopCards">{[
+          <form className="continuousGuide" onSubmit={createContinuousTask}><div className="guideIntro"><div><b>{editingWorkflowId?"编辑持续任务":"创建一个会持续工作的AI任务"}</b><p>{editingWorkflowId?"修改运行方式、数据源或判断标准，保存后立即生效；运行历史会保留。":"选择运行方式和判断标准，确认后由自动化工作流托管。"}</p></div>{editingWorkflowId&&<button type="button" className="outline" onClick={()=>{setEditingWorkflowId(null);setAskMode("quick");}}>取消编辑</button>}</div><div className="loopCards">{[
             ["回合制","AI通过多轮询问和沟通完成","需求访谈、方案讨论"],["目标制","AI持续执行直到达到目标","整理线索、优化方案"],["定时制","按照固定时间重复执行","日报、周报、舆情监测"],["主动制","发现事件或异常后主动执行","投诉提醒、指标异常"],
-          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label>{continuous.loopType==="定时制"&&<label>每天运行时间（北京时间）<input required type="time" value={continuous.scheduleTime} onChange={e=>setContinuous({...continuous,scheduleTime:e.target.value})}/></label>}{continuous.loopType==="主动制"&&<><label className="wide">事件源<select value={continuous.watchSourceType} onChange={e=>setContinuous({...continuous,watchSourceType:e.target.value,watchSourceRef:""})}><option value="free">通用观察（AI 依据任务目标判断）</option><option value="data_source">指定数据源（周期检查最新采集结果）</option><option value="inbound_message">渠道消息（收到飞书/钉钉/企微消息时评估）</option></select></label>{continuous.watchSourceType==="data_source"&&<label>监测数据源<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择数据源</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select></label>}{continuous.watchSourceType==="inbound_message"&&<label>监听平台<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择平台</option>{connectors.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}{continuous.watchSourceType!=="inbound_message"&&<label>检查间隔（分钟）<input type="number" min="1" max="1440" value={continuous.checkInterval} onChange={e=>setContinuous({...continuous,checkInterval:e.target.value})}/></label>}<label className="wide">触发条件<textarea required value={continuous.triggerCondition} onChange={e=>setContinuous({...continuous,triggerCondition:e.target.value})} placeholder="用一句话描述什么情况下该触发。例如：出现客户投诉或负面反馈；或某指标较上次明显下降。"/></label></>}{(continuous.loopType==="定时制"||(continuous.loopType==="主动制"&&continuous.watchSourceType!=="data_source"))&&<label className="wide">数据源（可选）<select value={continuous.dataSourceRef} onChange={e=>setContinuous({...continuous,dataSourceRef:e.target.value})}><option value="">不接数据源（仅按目标执行）</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select><small>选定后，任务运行时会先采集这个数据源的最新内容，再交给 AI 处理。</small></label>}<label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>确认并创建 →</button></div></form>}
+          ].map(x=><button type="button" key={x[0]} className={continuous.loopType===x[0]?"selected":""} onClick={()=>setContinuous({...continuous,loopType:x[0],triggerType:x[0]==="定时制"?"每日定时":x[0]==="主动制"?"事件触发":"手动触发"})}><b>{x[0]}</b><span>{x[1]}</span><small>{x[2]}</small></button>)}</div><div className="continuousGrid"><label>任务名称<input required value={continuous.name} onChange={e=>setContinuous({...continuous,name:e.target.value})} placeholder="例如：每日重点客户整理"/></label><label>触发方式<select value={continuous.triggerType} onChange={e=>setContinuous({...continuous,triggerType:e.target.value})}><option>手动触发</option><option>收到消息</option><option>每日定时</option><option>每周定时</option><option>事件触发</option></select></label>{continuous.loopType==="定时制"&&<label>每天运行时间（北京时间）<input required type="time" value={continuous.scheduleTime} onChange={e=>setContinuous({...continuous,scheduleTime:e.target.value})}/></label>}{continuous.loopType==="主动制"&&<><label className="wide">事件源<select value={continuous.watchSourceType} onChange={e=>setContinuous({...continuous,watchSourceType:e.target.value,watchSourceRef:""})}><option value="free">通用观察（AI 依据任务目标判断）</option><option value="data_source">指定数据源（周期检查最新采集结果）</option><option value="inbound_message">渠道消息（收到飞书/钉钉/企微消息时评估）</option></select></label>{continuous.watchSourceType==="data_source"&&<label>监测数据源<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择数据源</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select></label>}{continuous.watchSourceType==="inbound_message"&&<label>监听平台<select required value={continuous.watchSourceRef} onChange={e=>setContinuous({...continuous,watchSourceRef:e.target.value})}><option value="">请选择平台</option>{connectors.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}{continuous.watchSourceType!=="inbound_message"&&<label>检查间隔（分钟）<input type="number" min="1" max="1440" value={continuous.checkInterval} onChange={e=>setContinuous({...continuous,checkInterval:e.target.value})}/></label>}<label className="wide">触发条件<textarea required value={continuous.triggerCondition} onChange={e=>setContinuous({...continuous,triggerCondition:e.target.value})} placeholder="用一句话描述什么情况下该触发。例如：出现客户投诉或负面反馈；或某指标较上次明显下降。"/></label></>}{(continuous.loopType==="定时制"||(continuous.loopType==="主动制"&&continuous.watchSourceType!=="data_source"))&&<label className="wide">数据源（可选）<select value={continuous.dataSourceRef} onChange={e=>setContinuous({...continuous,dataSourceRef:e.target.value})}><option value="">不接数据源（仅按目标执行）</option>{sources.map(item=><option key={item.id} value={item.id}>#{item.id} · {item.name}</option>)}</select><small>选定后，任务运行时会先采集这个数据源的最新内容，再交给 AI 处理。</small></label>}<label className="wide">任务目标<textarea required value={continuous.goal} onChange={e=>setContinuous({...continuous,goal:e.target.value})} placeholder="例如：每天整理新增客户，并找出最值得跟进的10个客户。"/></label></div><div className="reviewChoice"><b>你是否清楚什么结果算合格？</b><div><button type="button" className={continuous.reviewMode==="明确标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"明确标准"})}>我知道合格标准<small>按规则自动检查和返工</small></button><button type="button" className={continuous.reviewMode==="探索标准"?"selected":""} onClick={()=>setContinuous({...continuous,reviewMode:"探索标准"})}>让AI先探索并提出标准<small>提出假设、寻找证据，再由人工确认</small></button></div></div><div className="continuousGrid"><label className="wide">{continuous.reviewMode==="明确标准"?"合格标准":"希望AI探索什么"}<textarea required value={continuous.reviewStandard} onChange={e=>setContinuous({...continuous,reviewStandard:e.target.value})} placeholder={continuous.reviewMode==="明确标准"?"例如：名称、需求和来源必须完整，不得编造联系方式。":"例如：找出客户流失的可能原因，并用业务数据验证。"}/></label><label>停止条件<input required value={continuous.stopCondition} onChange={e=>setContinuous({...continuous,stopCondition:e.target.value})} placeholder="例如：完成10条合格记录"/></label><label>最大循环次数<input type="number" min="1" max="10" value={continuous.maxLoops} onChange={e=>setContinuous({...continuous,maxLoops:e.target.value})}/></label><label>完成后<select value={continuous.finalAction} onChange={e=>setContinuous({...continuous,finalAction:e.target.value})}><option>提交管理员审批</option><option>通知负责人</option><option>保存结果不执行</option></select></label><label>失败后<select value={continuous.failureAction} onChange={e=>setContinuous({...continuous,failureAction:e.target.value})}><option>通知负责人</option><option>转人工处理</option><option>暂停任务</option></select></label></div><div className="taskConfirm"><div><b>{continuous.name||"待命名的持续任务"}</b><p>{continuous.loopType} · {continuous.reviewMode} · 最多{continuous.maxLoops}次 · {continuous.finalAction}</p></div><button>{editingWorkflowId?"保存修改 →":"确认并创建 →"}</button></div></form>}
         </section>
         <aside className={`insightPanel ${insightCollapsed?"collapsed":""}`}><div className="insightTitle"><h3>当前运行状态</h3><button type="button" onClick={()=>setInsightCollapsed(value=>!value)} title={insightCollapsed?"展开运行状态":"收起运行状态"}>{insightCollapsed?<ChevronLeftIcon style={{ width: 12, height: 12 }} />:<ChevronRightIcon style={{ width: 12, height: 12 }} />}<span>{insightCollapsed?"展开":"收起"}</span></button></div>{!insightCollapsed&&<><div className="controlCard"><span>身份权限</span><b>{role}</b></div><div className="controlCard"><span>企业资料</span><b>{docs.length} 份</b></div><div className="controlCard"><span>审计记录</span><b>{logs.length} 条</b></div><button className="viewAudit" onClick={() => setTab("logs")}>查看审计记录 →</button></>}</aside>
       </div>}
@@ -1250,7 +1291,7 @@ ${content}`,
 
       {tab === "agents" && <AgentsPanel agents={agents} agentRuns={agentRuns} activeAgent={activeAgent} selectedAgentIds={selectedAgentIds} setSelectedAgentIds={setSelectedAgentIds} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} setModalType={setModalType} agentSettings={agentSettings} startAgent={startAgent} deleteModule={deleteModule} deleteSelectedModules={deleteSelectedModules} loadModules={loadModules} />}
 
-      {tab === "workflows" && <WorkflowsPanel workflows={workflows} workflowRuns={workflowRuns} selectedWorkflowIds={selectedWorkflowIds} runWorkflow={runWorkflow} runningWorkflow={runningWorkflow} setRunningWorkflow={setRunningWorkflow} runInput={runInput} selectedRun={selectedRun} setModalType={setModalType} setSelectedWorkflowIds={setSelectedWorkflowIds} setRunWorkflow={setRunWorkflow} setRunInput={setRunInput} setSelectedRun={setSelectedRun} chooseWorkflowTemplate={chooseWorkflowTemplate} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} deleteSelectedModules={deleteSelectedModules} runModule={runModule} deleteModule={deleteModule} loadModules={loadModules} setNotice={setNotice} loadState={loadState} loadGovernance={loadGovernance} loadArtifacts={async () => { await Promise.all([loadArtifacts(), loadArtifactResources()]); }} />}
+      {tab === "workflows" && <WorkflowsPanel workflows={workflows} workflowRuns={workflowRuns} selectedWorkflowIds={selectedWorkflowIds} runWorkflow={runWorkflow} runningWorkflow={runningWorkflow} setRunningWorkflow={setRunningWorkflow} runInput={runInput} selectedRun={selectedRun} setModalType={setModalType} setSelectedWorkflowIds={setSelectedWorkflowIds} setRunWorkflow={setRunWorkflow} setRunInput={setRunInput} setSelectedRun={setSelectedRun} chooseWorkflowTemplate={chooseWorkflowTemplate} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} deleteSelectedModules={deleteSelectedModules} runModule={runModule} deleteModule={deleteModule} editWorkflow={editWorkflow} loadModules={loadModules} setNotice={setNotice} loadState={loadState} loadGovernance={loadGovernance} loadArtifacts={async () => { await Promise.all([loadArtifacts(), loadArtifactResources()]); }} />}
 
       {tab === "data" && <CollectionPanel sources={sources} collectionRuns={collectionRuns} selectedSourceIds={selectedSourceIds} selectedCollectionRunIds={selectedCollectionRunIds} selectedCollectionRun={selectedCollectionRun} runningSourceId={runningSourceId} cleaningRules={cleaningRules} cleanedPreview={cleanedPreview} showCleaning={showCleaning} localCleaningFile={localCleaningFile} localCleaningBusy={localCleaningBusy} setSelectedSourceIds={setSelectedSourceIds} setSelectedCollectionRunIds={setSelectedCollectionRunIds} setSelectedCollectionRun={setSelectedCollectionRun} setRunningSourceId={setRunningSourceId} setCleaningRules={setCleaningRules} setCleanedPreview={setCleanedPreview} setShowCleaning={setShowCleaning} setLocalCleaningFile={setLocalCleaningFile} setLocalCleaningBusy={setLocalCleaningBusy} setCollectionRuns={setCollectionRuns} setNotice={setNotice} setAllSelectedIds={setAllSelectedIds} toggleSelectedId={toggleSelectedId} runModule={runModule} deleteModule={deleteModule} deleteSelectedModules={deleteSelectedModules} loadModules={loadModules} loadState={loadState} loadPersonalKnowledge={loadPersonalKnowledge} deleteBatch={deleteBatch} modelModeLabel={modelModeLabel} newSourceTask={newSourceTask} openSourceEditor={openSourceEditor} />}
 

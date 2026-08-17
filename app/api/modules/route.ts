@@ -55,7 +55,7 @@ app.get("*", async (c) => {
     : runtime.DB.prepare("SELECT id,source_id AS sourceId,source_name AS sourceName,actor,status,http_status AS httpStatus,row_count AS rowCount,content_type AS contentType,preview,error,model_used AS modelUsed,target_store AS targetStore,output_format AS outputFormat,collector_mode AS collectorMode,created_at AS createdAt,published_at AS publishedAt FROM data_collection_runs WHERE actor=? ORDER BY id DESC LIMIT 30").bind(user.email);
   const [agents, workflows, sources, runs, collectionRuns, agentRuns] = await runtime.DB.batch([
     agentQuery,
-    runtime.DB.prepare("SELECT id,name,trigger_type AS triggerType,steps,status,loop_type AS loopType,review_mode AS reviewMode,review_standard AS reviewStandard,stop_condition AS stopCondition,max_loops AS maxLoops,final_action AS finalAction,failure_action AS failureAction,goal,last_run_at AS lastRunAt,created_at AS createdAt FROM workflows ORDER BY id DESC"),
+    runtime.DB.prepare("SELECT id,name,trigger_type AS triggerType,steps,status,loop_type AS loopType,review_mode AS reviewMode,review_standard AS reviewStandard,stop_condition AS stopCondition,max_loops AS maxLoops,final_action AS finalAction,failure_action AS failureAction,goal,schedule_time AS scheduleTime,watch_source_type AS watchSourceType,watch_source_ref AS watchSourceRef,trigger_condition AS triggerCondition,check_interval_min AS checkIntervalMin,enabled,last_run_at AS lastRunAt,created_at AS createdAt FROM workflows ORDER BY id DESC"),
     runtime.DB.prepare("SELECT s.id,s.name,s.source_type AS sourceType,s.source_url AS sourceUrl,s.schedule,s.status,s.last_run_at AS lastRunAt,s.created_at AS createdAt,d.request_method AS requestMethod,d.request_headers AS requestHeaders,d.content_selector AS contentSelector,d.extract_fields AS extractFields,d.target_category AS targetCategory,d.visibility,d.publish_mode AS publishMode,d.sample_data AS sampleData,d.model_mode AS modelMode,d.target_store AS targetStore,d.output_format AS outputFormat,d.collector_mode AS collectorMode,d.platform,d.keyword,d.crawl_depth AS crawlDepth,d.max_pages AS maxPages,d.url_pattern AS urlPattern,d.exclude_pattern AS excludePattern,d.include_comments AS includeComments,d.export_profile AS exportProfile,d.respect_robots AS respectRobots FROM data_sources s LEFT JOIN data_source_details d ON d.source_id=s.id ORDER BY s.id DESC"),
     runQuery,
     collectionRunQuery,
@@ -177,6 +177,18 @@ app.post("*", async (c) => {
     const proactiveNextRun = isProactive && watchSourceType !== "inbound_message" ? nextCheckAt(checkIntervalMin, new Date()) : null;
     const nextRun = isProactive ? proactiveNextRun : firstRun;
     const enabled = isProactive ? 1 : (firstRun ? 1 : 0);
+    // 编辑已有持续任务：带数字 id 即走 UPDATE（与数据源同一约定）。
+    // 权限＝创建者或管理员；只改任务定义，不动 created_by/created_at/status/last_run_at/last_triggered_at（保留归属与冷却历史）。
+    const workflowId = Number(body.id || 0);
+    if (workflowId > 0) {
+      const existing = await runtime.DB.prepare("SELECT id,name,created_by AS createdBy FROM workflows WHERE id=?").bind(workflowId).first<{ id: number; name: string; createdBy: string }>();
+      if (!existing) return fail("要编辑的任务不存在。", 404);
+      if (existing.createdBy !== actor && user.role !== "管理员") return fail("只能编辑自己创建的任务。", 403);
+      await runtime.DB.prepare("UPDATE workflows SET name=?,trigger_type=?,steps=?,loop_type=?,review_mode=?,review_standard=?,stop_condition=?,max_loops=?,final_action=?,failure_action=?,schedule_time=?,next_run_at=?,enabled=?,goal=?,watch_source_type=?,watch_source_ref=?,trigger_condition=?,check_interval_min=? WHERE id=?")
+        .bind(body.name.trim(), body.triggerType || "手动触发", JSON.stringify(nodes), body.loopType || "单次", body.reviewMode || "明确标准", body.reviewStandard || "", body.stopCondition || "", Math.min(10, Math.max(1, Number(body.maxLoops) || 3)), body.finalAction || "输出结果", body.failureAction || "通知负责人", scheduleTime, nextRun, enabled, body.goal || "", watchSourceType, watchSourceRef, triggerCondition, checkIntervalMin, workflowId).run();
+      await audit(actor, "编辑持续任务", body.name, "成功", `${nodes.map(n => n.name).join(" → ")}${existing.name !== body.name.trim() ? `；原名称：${existing.name}` : ""}`);
+      return success({ ok: true, id: workflowId, message: "持续任务已更新。" });
+    }
     await runtime.DB.prepare("INSERT INTO workflows(name,trigger_type,steps,status,loop_type,review_mode,review_standard,stop_condition,max_loops,final_action,failure_action,created_at,created_by,schedule_time,next_run_at,enabled,goal,watch_source_type,watch_source_ref,trigger_condition,check_interval_min) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(body.name.trim(), body.triggerType || "手动触发", JSON.stringify(nodes), "已启用", body.loopType || "单次", body.reviewMode || "明确标准", body.reviewStandard || "", body.stopCondition || "", Math.min(10, Math.max(1, Number(body.maxLoops) || 3)), body.finalAction || "输出结果", body.failureAction || "通知负责人", now, actor, scheduleTime, nextRun, enabled, body.goal || "", watchSourceType, watchSourceRef, triggerCondition, checkIntervalMin).run();
     const proactiveNote = isProactive
