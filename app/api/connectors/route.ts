@@ -410,6 +410,91 @@ app.post("*", async (c) => {
     });
   }
 
+  // 一键自检：前端点「发消息验收」即触发。全程后端自动完成，无需人工去平台发消息。
+  // 依次验证：①平台凭证有效 ②长连接网关在线 ③消息→模型→回复整条链路能出回复。
+  // 第③步复用真实中继入口（/api/platform ...transport=long_connection），走的就是真实机器人消息的同一段代码，
+  // 只是把「用户在飞书发消息」这一物理动作换成后端自发一条自检消息，因此计数也会真实 +1。
+  if (body.action === "selfTest") {
+    const row = await runtime.DB.prepare(
+      "SELECT encrypted_credentials AS encryptedCredentials,connection_key AS connectionKey,connection_mode AS connectionMode FROM user_platform_connections WHERE owner_email=? AND platform=?",
+    )
+      .bind(user.email, body.platform)
+      .first<{ encryptedCredentials: string; connectionKey: string; connectionMode: ConnectionMode }>();
+    if (!row)
+      return fail(`请先完成${names[body.platform]}平台接入。`, 400);
+    const credentials = await decrypt(row.encryptedCredentials);
+    const steps: Array<{ label: string; ok: boolean; detail: string }> = [];
+
+    // ① 平台凭证校验
+    try {
+      const response = await test(body.platform, credentials);
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      const ok =
+        response.ok &&
+        (data.code === undefined || data.code === 0) &&
+        (data.errcode === undefined || data.errcode === 0);
+      steps.push({ label: "平台凭证校验", ok, detail: ok ? "App ID / App Secret 有效" : "凭证或权限校验未通过，请检查应用凭证。" });
+    } catch (error) {
+      steps.push({ label: "平台凭证校验", ok: false, detail: error instanceof Error ? error.message : "凭证校验请求失败" });
+    }
+
+    if (row.connectionMode === "long_connection") {
+      // ② 通道网关在线（心跳新鲜度）
+      const gateway = await runtime.DB.prepare(
+        "SELECT state,last_heartbeat_at AS lastHeartbeatAt FROM platform_gateway_status WHERE owner_email=? AND platform=?",
+      )
+        .bind(user.email, body.platform)
+        .first<{ state: string; lastHeartbeatAt: string }>()
+        .catch(() => null);
+      const heartbeatAge = gateway?.lastHeartbeatAt ? Date.now() - Date.parse(gateway.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
+      const gatewayOnline = gateway?.state === "online" && heartbeatAge < 90_000;
+      steps.push({
+        label: "通道网关在线",
+        ok: gatewayOnline,
+        detail: gatewayOnline ? "长连接网关心跳正常，机器人已连上平台。" : "网关未在线，请确认 channel-gateway 已启动并通过平台鉴权。",
+      });
+
+      // ③ 消息 → 模型 → 回复整条链路
+      try {
+        const origin = requestOrigin(c.req.raw);
+        const relayUrl = `${origin}/api/platform?platform=${body.platform}&connection=${row.connectionKey}&transport=long_connection`;
+        const probe = `【平台一键自检】请回复“收到”即可。`;
+        const relayResponse = await fetch(relayUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${credentials.callbackToken}` },
+          body: JSON.stringify({
+            eventId: `selftest-${crypto.randomUUID()}`,
+            platformUserId: `selftest-${user.email}`,
+            text: probe,
+            modelMode: credentials.defaultModelMode || "auto",
+          }),
+        });
+        const relayData = (await relayResponse.json().catch(() => ({}))) as { ok?: boolean; reply?: string };
+        const replyText = String(relayData.reply || "").trim();
+        const ok = relayResponse.ok && Boolean(relayData.ok) && replyText.length > 0;
+        steps.push({
+          label: "消息回复链路",
+          ok,
+          detail: ok ? `机器人已生成回复：${replyText.slice(0, 60)}${replyText.length > 60 ? "…" : ""}` : "消息进入系统后未能生成回复，请检查机器人默认模型与 API Key。",
+        });
+      } catch (error) {
+        steps.push({ label: "消息回复链路", ok: false, detail: error instanceof Error ? error.message : "回复链路请求失败" });
+      }
+    }
+
+    const passed = steps.every((step) => step.ok);
+    const summary = steps.map((step) => `${step.ok ? "✅" : "❌"} ${step.label}：${step.detail}`).join("\n");
+    const firstFail = steps.find((step) => !step.ok);
+    return success({
+      passed,
+      steps,
+      summary,
+      message: passed
+        ? `${names[body.platform]}机器人一键自检通过 ✅ 凭证有效 · 网关在线 · 回复链路正常。`
+        : `${names[body.platform]}机器人一键自检未通过 ❌ ${firstFail ? `${firstFail.label}：${firstFail.detail}` : ""}`,
+    });
+  }
+
   const row = await runtime.DB.prepare(
     "SELECT encrypted_credentials AS encryptedCredentials FROM user_platform_connections WHERE owner_email=? AND platform=?",
   )

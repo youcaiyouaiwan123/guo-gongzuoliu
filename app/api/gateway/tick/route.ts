@@ -1,6 +1,6 @@
 import { createApp, success, fail } from "../../_app";
 import { env } from "cloudflare:workers";
-import { runWorkflowById, judgeTrigger } from "../../modules/route";
+import { runWorkflowById, judgeTrigger, collectSource } from "../../modules/route";
 import { ensureSchema, audit } from "../../modules/_shared";
 import { normalizeBusinessRoleValue, normalizeRoleValue } from "../../_auth";
 import { nextRunAt, nextCheckAt, withinCooldown, formatBeijingTime } from "../../_schedule";
@@ -70,13 +70,16 @@ async function recordSkipped(workflow: DueWorkflow, message: string) {
 
 /**
  * 取主动制任务这一轮要"观察"的内容，交给 AI 判定是否命中触发条件。
- * data_source：读该数据源最近一次采集结果的预览；没有采集记录时返回空串（judgeTrigger 会判未命中）。
+ * data_source：先对该源刷新采集一次（拿到最新内容再判定，避免读到旧快照/空结果），
+ *              再读它最近一次采集结果的预览；采集失败则回退到已有的最近一次结果。
  * free：不绑定具体源，用任务目标本身作为观察上下文（后续可接更多信号源）。
  */
 async function proactiveObservation(task: DueProactive): Promise<string> {
   if (task.watchSourceType === "data_source") {
     const sourceId = Number(task.watchSourceRef);
     if (!(sourceId > 0)) return "";
+    // 以创建者身份刷新采集；失败不抛出，继续读已有的最近一次结果。
+    await collectSource(sourceId, task.createdBy, false).catch(() => undefined);
     const latest = await runtime.DB.prepare(
       "SELECT source_name AS sourceName,status,preview,created_at AS createdAt FROM data_collection_runs WHERE source_id=? ORDER BY id DESC LIMIT 1",
     ).bind(sourceId).first<{ sourceName: string; status: string; preview: string; createdAt: string }>();

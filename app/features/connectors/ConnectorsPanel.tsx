@@ -100,42 +100,25 @@ export default function ConnectorsPanel({ connectors, setConnectors, testingConn
 
   async function testConnectorReal(item: Connector) {
     if (item.connectionMode === "long_connection") {
-      if (!item.gatewayOnline) {
-        setNotice(`${item.name}通道网关暂未在线：服务器会自动同步并启动网关，请刷新状态；显示“真实链路在线”后，再给机器人发消息验收。`);
-        return;
-      }
-      const beforeInbound = item.gatewayInboundCount || 0;
-      const beforeOutbound = item.gatewayOutboundCount || 0;
-      const phrase = `海芯博创机器人真实测试 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+      // 一键自检：点击即由后端自动跑「凭证校验 → 网关在线 → 消息回复链路」三项，无需人工去平台发消息。
       setTestingConnector(item.id);
-      setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase, startedAt: new Date().toISOString() } }));
+      setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase: "一键自检", startedAt: new Date().toISOString(), result: "正在自检：校验凭证、网关与回复链路…" } }));
+      setNotice(`正在对${item.name}机器人进行一键自检…`);
       try {
-        await navigator.clipboard?.writeText(phrase);
-      } catch {}
-      setNotice(`请现在把这句话发给${item.name}机器人：${phrase}。系统会检测机器人是否真的收到并回复。`);
-      try {
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          await new Promise(resolve => setTimeout(resolve, 2500));
-          const response = await fetch("/api/connectors", { cache: "no-store" });
-          const data = await response.json();
-          const latestConnectors: Connector[] = data.connectors || [];
-          setConnectors(latestConnectors);
-          const latest = latestConnectors.find(connector => connector.id === item.id);
-          if (!latest) continue;
-          const inboundOk = (latest.gatewayInboundCount || 0) > beforeInbound;
-          const outboundOk = (latest.gatewayOutboundCount || 0) > beforeOutbound;
-          if (inboundOk && outboundOk) {
-            setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase, startedAt: previous[item.id]?.startedAt || new Date().toISOString(), result: "测试通过：机器人已收到消息并完成回复。" } }));
-            setNotice(`${item.name}真实消息测试通过：你发给机器人的消息已进入系统，并且系统已完成回复。`);
-            return;
-          }
-          if (inboundOk) {
-            setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase, startedAt: previous[item.id]?.startedAt || new Date().toISOString(), result: "已收到消息，但还没有成功回复；请检查机器人默认模型或后台日志。" } }));
-          }
-        }
-        setNotice(`${item.name}真实消息测试未通过：30 秒内没有检测到完整的“收到消息 + 发出回复”。请确认你把测试句发给了正确机器人，并检查通道网关日志。`);
+        const response = await fetch("/api/connectors", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "selfTest", platform: item.id }),
+        });
+        const data = await response.json();
+        const detail: string = data.summary || data.message || (response.ok ? "自检完成" : "自检失败");
+        setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase: "一键自检", startedAt: previous[item.id]?.startedAt || new Date().toISOString(), result: detail } }));
+        setNotice(data.message || (response.ok ? "自检完成" : "自检失败"));
+        await loadConnectors();
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : `${item.name}真实消息测试失败`);
+        const message = error instanceof Error ? error.message : `${item.name}自检失败`;
+        setConnectorLiveTests(previous => ({ ...previous, [item.id]: { phrase: "一键自检", startedAt: previous[item.id]?.startedAt || new Date().toISOString(), result: message } }));
+        setNotice(message);
       } finally {
         setTestingConnector("");
       }
@@ -296,16 +279,14 @@ export default function ConnectorsPanel({ connectors, setConnectors, testingConn
         {platformDefs.map(([id, name, mark, desc]) => renderPlatformCard(id, name, mark, desc))}
         {Object.entries(connectorLiveTests).length > 0 && <div className="liveTestPanelInline">
           <div className="liveTestPanelHeader">
-            <b>机器人真实消息测试</b>
-            <span>把测试消息发给对应平台机器人，系统只以「收到 + 回复」为通过。</span>
+            <b>机器人一键自检</b>
+            <span>点击「发消息验收」即自动完成：凭证校验 → 网关在线 → 消息回复链路，无需手动去平台发消息。</span>
           </div>
           {Object.entries(connectorLiveTests).map(([id, test]) => {
             const item = connectors.find(connector => connector.id === id);
             return <div className="liveTestRow" key={id}>
-              <strong>{item?.name || id} · 请发送这句话</strong>
-              <code>{test.phrase}</code>
-              <small className={test.result?.includes("通过") ? "routeHealthy" : "routeWarning"}>{test.result || "等待机器人消息进入通道网关…"}</small>
-              <button type="button" className="outline" onClick={() => copyGatewayText(test.phrase)}><ClipboardIcon style={{ width: 11, height: 11 }} /> 复制测试消息</button>
+              <strong>{item?.name || id} · 自检结果</strong>
+              <small className={test.result?.includes("通过") ? "routeHealthy" : "routeWarning"} style={{ whiteSpace: "pre-line" }}>{test.result || "正在自检…"}</small>
             </div>;
           })}
         </div>}

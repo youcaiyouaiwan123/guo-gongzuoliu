@@ -104,30 +104,36 @@ test("能力目录是叶子模块，且授权在缺少策略行时按目录默�
 });
 
 test("模型与平台连接的写操作全部经过能力授权", async () => {
+  // 这些路由已统一改用 createApp()/Hono 装配：authorizeCapability 从 _app 转出（_app 再从
+  // _auth 导出），身份认证由 app.use("*", auth()) 中间件统一完成，写操作在 app.post/app.delete
+  // 处理体内校验能力。契约不变——每个写动作都必须在建表/请求体解析之前完成能力授权。
   const expectations = [
-    ["app/api/model/route.ts", "manage_personal_models", ["POST", "DELETE"]],
-    ["app/api/image-models/route.ts", "manage_personal_models", ["POST", "DELETE"]],
-    ["app/api/connectors/route.ts", "manage_personal_platform", ["POST"]],
+    ["app/api/model/route.ts", "manage_personal_models", ["post", "delete"]],
+    ["app/api/image-models/route.ts", "manage_personal_models", ["post", "delete"]],
+    ["app/api/connectors/route.ts", "manage_personal_platform", ["post"]],
   ];
 
   for (const [path, capability, verbs] of expectations) {
     const text = await source(path);
-    assert.match(text, /import\s+\{[^}]*authorizeCapability[^}]*\}\s+from\s+"\.\.\/_auth"/, `${path} 必须导入 authorizeCapability。`);
+    assert.match(text, /import\s+\{[^}]*authorizeCapability[^}]*\}\s+from\s+"\.\.\/_app"/, `${path} 必须从 _app 引入 authorizeCapability。`);
+    assert.match(text, /app\.use\(\s*"\*"\s*,\s*auth\(\)\s*\)/, `${path} 必须用 auth() 中间件统一完成身份认证。`);
 
     for (const verb of verbs) {
-      const start = text.indexOf(`export async function ${verb}(request: Request)`);
-      assert.ok(start > -1, `${path} 缺少 ${verb} 处理函数。`);
-      const next = text.indexOf("\nexport async function ", start + 1);
-      const body = text.slice(start, next === -1 ? undefined : next);
+      const start = text.indexOf(`app.${verb}("*"`);
+      assert.ok(start > -1, `${path} 缺少 ${verb.toUpperCase()} 处理函数。`);
+      // 处理体到下一个 app.xxx 处理器或文件路由桥接（export const）为止。
+      const bounds = [text.indexOf("\napp.", start + 1), text.indexOf("\nexport const", start + 1)].filter(pos => pos > -1);
+      const body = text.slice(start, bounds.length ? Math.min(...bounds) : undefined);
 
-      assert.match(body, new RegExp(`authorizeCapability\\(runtime\\.DB, auth\\.user, "${capability}"\\)`), `${path} 的 ${verb} 必须校验 ${capability}。`);
+      assert.match(body, new RegExp(`authorizeCapability\\(runtime\\.DB,\\s*user,\\s*"${capability}"\\)`), `${path} 的 ${verb.toUpperCase()} 必须校验 ${capability}。`);
 
-      // 授权必须紧随身份认证，且早于任何数据库写入或请求体解析。
-      const authenticateAt = body.indexOf("await authenticate(request");
+      // 授权必须早于任何建表、业务写入与请求体解析，避免未授权也能触发副作用。
       const authorizeAt = body.indexOf("await authorizeCapability(");
       const schemaAt = body.search(/await (schema|ensureSchema)\(\)/);
-      assert.ok(authenticateAt > -1 && authorizeAt > authenticateAt, `${path} 的 ${verb} 必须先认证再授权。`);
-      if (schemaAt > -1) assert.ok(authorizeAt < schemaAt, `${path} 的 ${verb} 授权必须早于建表与业务操作。`);
+      const bodyParseAt = body.search(/await c\.req\.(json|formData|text)\(/);
+      assert.ok(authorizeAt > -1, `${path} 的 ${verb.toUpperCase()} 必须在处理体内校验能力。`);
+      if (schemaAt > -1) assert.ok(authorizeAt < schemaAt, `${path} 的 ${verb.toUpperCase()} 授权必须早于建表与业务操作。`);
+      if (bodyParseAt > -1) assert.ok(authorizeAt < bodyParseAt, `${path} 的 ${verb.toUpperCase()} 授权必须早于解析请求体。`);
     }
   }
 });
@@ -505,10 +511,12 @@ test("版本化迁移是数据库结构的唯一事实来源", async () => {
 test("模型调用全部带超时，且内层比外层先超时", async () => {
   const provider = await source("app/api/_modelProvider.ts");
 
-  // 三个出网调用（中转、直连文字、图片）都必须走带超时的封装。
+  // 全部出网调用（中转、中转重试、直连文字、图片）都必须走带超时的封装。
+  // 真正的安全不变量是"只有 fetchWithTimeout 内部允许裸 fetch"——只要裸 fetch 恒为 1，
+  // 其余任何出网调用就必然被包进带超时的封装里。
   const bareFetch = [...provider.matchAll(/await fetch\(/g)].length;
   assert.equal(bareFetch, 1, "只有 fetchWithTimeout 内部允许直接调用 fetch。");
-  assert.equal([...provider.matchAll(/await fetchWithTimeout\(/g)].length, 3, "三处模型调用都必须带超时。");
+  assert.equal([...provider.matchAll(/await fetchWithTimeout\(/g)].length, 4, "四处模型出网调用都必须带超时。");
   assert.match(provider, /AbortSignal\.timeout\(timeoutMs\)/, "超时必须真正中断请求，而不只是提示。");
   assert.match(provider, /TimeoutError/, "超时要转换成可读的中文提示。");
 
