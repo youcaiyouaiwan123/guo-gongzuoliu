@@ -30,7 +30,7 @@ test("列表 SELECT 能在真实库上取到编辑回填要用的别名列", asy
   assert.ok(sql, "未找到工作流列表 SELECT，实现可能已被改写。");
 
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE workflows(id INTEGER PRIMARY KEY, name TEXT, trigger_type TEXT, steps TEXT, status TEXT, loop_type TEXT, review_mode TEXT, review_standard TEXT, stop_condition TEXT, max_loops INTEGER, final_action TEXT, failure_action TEXT, goal TEXT, schedule_time TEXT, watch_source_type TEXT, watch_source_ref TEXT, trigger_condition TEXT, check_interval_min INTEGER, enabled INTEGER, last_run_at TEXT, created_at TEXT, created_by TEXT, next_run_at TEXT, last_triggered_at TEXT)");
+  db.exec("CREATE TABLE workflows(id INTEGER PRIMARY KEY, name TEXT, trigger_type TEXT, steps TEXT, status TEXT, loop_type TEXT, review_mode TEXT, review_standard TEXT, stop_condition TEXT, max_loops INTEGER, final_action TEXT, failure_action TEXT, goal TEXT, schedule_time TEXT, watch_source_type TEXT, watch_source_ref TEXT, trigger_condition TEXT, check_interval_min INTEGER, enabled INTEGER, last_checked_at TEXT, last_check_result TEXT, last_check_detail TEXT, last_run_at TEXT, created_at TEXT, created_by TEXT, next_run_at TEXT, last_triggered_at TEXT)");
   db.exec("INSERT INTO workflows(id,name,trigger_type,steps,status,loop_type,review_mode,review_standard,stop_condition,max_loops,final_action,failure_action,goal,schedule_time,watch_source_type,watch_source_ref,trigger_condition,check_interval_min,enabled,last_run_at,created_at) VALUES (7,'监测A','事件触发','[]','已启用','主动制','明确标准','','',3,'通知负责人','通知负责人','看板异动','','data_source','12','出现异常',15,1,NULL,'2026-01-01')");
 
   const row = db.prepare(sql).get();

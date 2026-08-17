@@ -72,7 +72,9 @@ async function recordSkipped(workflow: DueWorkflow, message: string) {
  * 取主动制任务这一轮要"观察"的内容，交给 AI 判定是否命中触发条件。
  * data_source：先对该源刷新采集一次（拿到最新内容再判定，避免读到旧快照/空结果），
  *              再读它最近一次采集结果的预览；采集失败则回退到已有的最近一次结果。
- * free：不绑定具体源，用任务目标本身作为观察上下文（后续可接更多信号源）。
+ * free：不绑定具体源，聚合创建者可见的最近真实信号（近期采集结果 + 目标相关知识），
+ *       让判定器有真实数据可依，而不是只对着一句"任务目标"空判——那样任何"数量/出现了X"
+ *       类条件都永远看不到证据、永远未命中。
  */
 async function proactiveObservation(task: DueProactive): Promise<string> {
   if (task.watchSourceType === "data_source") {
@@ -86,9 +88,41 @@ async function proactiveObservation(task: DueProactive): Promise<string> {
     if (!latest) return "";
     return `数据源「${latest.sourceName}」最近一次采集（${latest.createdAt}，状态：${latest.status}）：\n${latest.preview || "（无内容）"}`;
   }
-  // free：让 AI 结合任务目标做通用观察判定。
-  const goal = await runtime.DB.prepare("SELECT goal FROM workflows WHERE id=?").bind(task.id).first<{ goal: string }>();
-  return `任务目标：${goal?.goal || task.name}`;
+  // free：任务目标 + 创建者最近的真实数据信号（采集结果 + 目标相关知识），拼成可判定的观察上下文。
+  const goalRow = await runtime.DB.prepare("SELECT goal FROM workflows WHERE id=?").bind(task.id).first<{ goal: string }>();
+  const goalText = (goalRow?.goal || task.name || "").trim();
+  const parts: string[] = [`任务目标：${goalText || task.name}`];
+  // 近期采集结果：取创建者最近几条已成功的采集预览，作为"世界的最新状态"喂给判定器。
+  const runs = await runtime.DB.prepare(
+    "SELECT source_name AS sourceName,status,preview,created_at AS createdAt FROM data_collection_runs WHERE actor=? AND status IN ('成功','已入知识库') AND preview<>'' ORDER BY id DESC LIMIT 3",
+  ).bind(task.createdBy).all<{ sourceName: string; status: string; preview: string; createdAt: string }>();
+  for (const run of runs.results || []) {
+    parts.push(`数据源「${run.sourceName}」最近采集（${run.createdAt}）：\n${(run.preview || "").slice(0, 1500)}`);
+  }
+  // 目标相关知识：按目标里的关键词命中全员或本人可见的知识文档，补充判定依据。
+  const words = Array.from(new Set((goalText.match(/[一-鿿]{2,}|[a-zA-Z0-9_-]{3,}/g) || []))).slice(0, 5);
+  if (words.length) {
+    let sql = "SELECT title,content FROM knowledge_documents WHERE (visibility='全员' OR created_by=?)";
+    const binds: unknown[] = [task.createdBy];
+    sql += ` AND (${words.map(() => "(title LIKE ? OR content LIKE ?)").join(" OR ")})`;
+    words.forEach(word => { binds.push(`%${word}%`, `%${word}%`); });
+    sql += " ORDER BY updated_at DESC,id DESC LIMIT 3";
+    const docs = await runtime.DB.prepare(sql).bind(...binds).all<{ title: string; content: string }>();
+    for (const doc of docs.results || []) {
+      parts.push(`知识「${doc.title}」：\n${(doc.content || "").slice(0, 1500)}`);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * 主动制"检查痕迹"落库：把这一轮判定结果写回 workflows 三列，前端卡片即可显示
+ * "上次检查时间 + 结果 + 依据"。命中/未命中/失败都记；冷却、被其他心跳领走这类瞬时状态不记，
+ * 以免覆盖掉更有价值的"已触发/未命中"判定。
+ */
+async function recordCheck(taskId: number, result: string, detail: string) {
+  await runtime.DB.prepare("UPDATE workflows SET last_checked_at=?,last_check_result=?,last_check_detail=? WHERE id=?")
+    .bind(new Date().toISOString(), result, (detail || "").slice(0, 500), taskId).run();
 }
 
 const app = createApp();
@@ -175,19 +209,29 @@ app.post("*", async (c) => {
     }
     try {
       const observation = await proactiveObservation(task);
+      if (!observation.trim()) {
+        // 观察内容为空（如 data_source 尚无任何采集结果）：判定没有意义，直接记痕迹跳过。
+        await recordCheck(task.id, "观察为空", task.watchSourceType === "data_source" ? "所选数据源还没有任何采集结果，无法判定。请先手动采集一次或检查数据源配置。" : "没有可供判定的观察内容。");
+        handled.push({ id: task.id, name: task.name, result: "主动制：观察为空，跳过" });
+        continue;
+      }
       const verdict = await judgeTrigger(task.createdBy, task.triggerCondition, observation);
       if (!verdict.trigger) {
+        await recordCheck(task.id, "未命中", verdict.reason);
         handled.push({ id: task.id, name: task.name, result: "主动制：未命中" });
         continue;
       }
       const role = await resolveActorRole(task.createdBy);
       const run = await runWorkflowById(task.id, task.createdBy, role, `【主动触发】${verdict.reason || task.triggerCondition}`, { sourceChannel: "主动触发" });
       await runtime.DB.prepare("UPDATE workflows SET last_triggered_at=? WHERE id=?").bind(now.toISOString(), task.id).run();
+      await recordCheck(task.id, "已触发", `${verdict.reason || task.triggerCondition}（运行#${run.id}·${run.status || "已执行"}）`);
       handled.push({ id: task.id, name: task.name, result: `主动制：已触发（${run.status || "已执行"}）`, runId: run.id });
       await audit(task.createdBy, "主动触发工作流", task.name, run.status === "失败" ? "失败" : "成功", `运行#${run.id}；依据：${verdict.reason || task.triggerCondition}`);
     } catch (error) {
-      // 判定或执行异常不该中断整轮心跳；下次检查会重试。
+      // 判定或执行异常不该中断整轮心跳；下次检查会重试。judgeTrigger 现在会把模型调用失败抛到这里，
+      // 记成"检查失败"而非伪装成"未命中"，前端能看出是链路故障、需去查密钥/接口。
       const message = error instanceof Error ? error.message : "主动制判定失败";
+      await recordCheck(task.id, "检查失败", message);
       handled.push({ id: task.id, name: task.name, result: `主动制：${message}` });
       await audit(task.createdBy, "主动触发工作流", task.name, "失败", message);
     }

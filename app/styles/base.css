@@ -329,6 +329,27 @@
   justify-content: space-between;
   gap: 16px;
 }
+.workflowCheckTrace {
+  margin: 8px 0 0;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.workflowCheckTrace b {
+  color: var(--text, inherit);
+  font-weight: 600;
+}
+.workflowCheckTrace.ok {
+  background: rgba(34, 160, 90, 0.1);
+  color: #1c7a48;
+}
+.workflowCheckTrace.bad {
+  background: rgba(214, 69, 69, 0.1);
+  color: #b23b3b;
+}
 .workflowCardTop h3 {
   margin: 0 0 5px;
   font-size: 15px;

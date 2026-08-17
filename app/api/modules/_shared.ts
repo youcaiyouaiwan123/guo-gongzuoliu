@@ -84,6 +84,12 @@ async function ensureSchema() {
   await ensureColumn(runtime.DB, "workflows", "trigger_condition", "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(runtime.DB, "workflows", "check_interval_min", "INTEGER NOT NULL DEFAULT 10");
   await ensureColumn(runtime.DB, "workflows", "last_triggered_at", "TEXT");
+  // 主动制"检查痕迹"：轮询判定 命中/未命中/失败 都不落 workflow_runs（未命中根本不产生运行），
+  // 以前只在网关内存日志里一闪而过，前端完全看不到它在工作。这三列给每条主动制任务留一条
+  // 最近判定痕迹，卡片上直接显示"上次检查 + 结果 + 依据"。
+  await ensureColumn(runtime.DB, "workflows", "last_checked_at", "TEXT");
+  await ensureColumn(runtime.DB, "workflows", "last_check_result", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "workflows", "last_check_detail", "TEXT NOT NULL DEFAULT ''");
 }
 
 async function getModel(email: string, mode = "auto") {

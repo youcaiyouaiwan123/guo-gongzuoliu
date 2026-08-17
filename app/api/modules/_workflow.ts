@@ -110,7 +110,12 @@ async function judgeLoop(
 /**
  * 主动制（事件触发）触发判定：让模型对照"触发条件"看"观察内容"是否命中。
  * 与 judgeLoop 不同，这一步发生在工作流"运行之前"，此时还没有 workflow_run，
- * 所以不落 step 记录，只是一次轻量模型调用；解析失败按"未命中"处理（宁可漏触发也不误触发）。
+ * 所以不落 step 记录，只是一次轻量模型调用。
+ *
+ * 异常处理刻意分两层：
+ *   - 模型调用失败（密钥失效/超时/接口挂）——**向上抛**，让调用方（tick）记成"检查失败"，
+ *     而不是伪装成"未命中"。以前这里 catch 吞掉一切，真出故障也只显示"未命中"，无从排查。
+ *   - 模型有返回但 JSON 不可解析——按"未命中"处理（宁可漏触发也不误触发），但带上原因说明。
  */
 export async function judgeTrigger(
   actor: string,
@@ -118,15 +123,16 @@ export async function judgeTrigger(
   observation: string,
 ): Promise<{ trigger: boolean; reason: string }> {
   const instruction = `你是主动监测判定器。请判断下面的"观察内容"是否满足给定的"触发条件"。\n触发条件：${condition}\n\n只输出一行 JSON，不要任何多余文字或代码块：{"trigger": true 或 false, "reason": "命中则说明依据；未命中则简述原因"}。判定要保守：只有确有证据满足条件才 true。`;
+  // 注意：askModel 的异常不在此捕获，交由 tick 记为"检查失败"。
+  const raw = await askModel(actor, instruction, observation, "auto");
   try {
-    const raw = await askModel(actor, instruction, observation, "auto");
     const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return { trigger: false, reason: "" };
+    if (!match) return { trigger: false, reason: "模型未返回可解析的判定结果，按未命中处理" };
     const parsed = JSON.parse(match[0]) as { trigger?: unknown; reason?: unknown };
     return { trigger: parsed.trigger === true, reason: String(parsed.reason ?? "").trim() };
   } catch {
-    // 模型接口异常或返回不可解析：按未命中处理，等下一轮再评估，绝不误触发工作流。
-    return { trigger: false, reason: "" };
+    // 有返回但不是合法 JSON：按未命中处理，等下一轮再评估，绝不误触发工作流。
+    return { trigger: false, reason: "模型返回无法解析为判定 JSON，按未命中处理" };
   }
 }
 
