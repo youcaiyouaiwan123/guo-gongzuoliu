@@ -23,7 +23,7 @@ import {
   invalidRequestHeaders,
   validateOcrImages,
 } from "./_collection";
-import { executeWorkflow, getRun, parseNodes, runWorkflowById, resumeApprovedWorkflow, judgeTrigger } from "./_workflow";
+import { executeWorkflow, getRun, parseNodes, runWorkflowById, resumeApprovedWorkflow, judgeTrigger, workflowApprover } from "./_workflow";
 
 export { runWorkflowById, resumeApprovedWorkflow, collectSource, judgeTrigger };
 
@@ -127,13 +127,28 @@ app.post("*", async (c) => {
       publishTarget: body.publishTarget || "智能助手",
       usageScope: body.usageScope || "企业内部",
     };
-    const status = body.status === "草稿" ? "草稿" : "已启用";
+    const isAdmin = user.role === "管理员";
+    // 员工创建的智能体一律先走审批：落库为「待审批」、生成一条审批请求，审批通过后才启用（见 governance/route.ts decide）。
+    // 管理员创建不受限，沿用「草稿 / 已启用」。
+    let approverEmail = "";
+    if (!isAdmin) {
+      approverEmail = await workflowApprover(actor);
+      if (!approverEmail) return fail("你所在的企业架构还没有可用审批人，无法提交智能体审批。请联系管理员先在企业架构中设置你的直属主管或部门负责人。", 409);
+    }
+    const status = isAdmin ? (body.status === "草稿" ? "草稿" : "已启用") : "待审批";
     const created = await runtime.DB.prepare("INSERT INTO ai_agents(name,description,instructions,knowledge_scope,status,created_at) VALUES(?,?,?,?,?,?) RETURNING id")
       .bind(body.name.trim(), body.description?.trim() || "企业专用智能体", instructions, body.knowledgeScope || "全员", status, now).first<{ id: number }>();
     await runtime.DB.prepare("INSERT INTO agent_configs(agent_id,config_json,created_by,updated_at) VALUES(?,?,?,?)")
       .bind(created!.id, JSON.stringify(config), actor, now).run();
-    await audit(actor, "创建智能体", body.name, "成功", `${status}；模型：${config.modelMode}；能力：${capabilities.join("、") || "仅对话"}`);
-    return success({ ok: true, id: created!.id, status }, 201);
+    const capText = capabilities.join("、") || "仅对话";
+    if (!isAdmin) {
+      await runtime.DB.prepare("INSERT INTO approval_requests(requester,request_type,title,reason,status,approver_email,agent_id,created_at) VALUES(?,?,?,?,?,?,?,?)")
+        .bind(actor, "创建智能体", `创建智能体：${body.name.trim()}`, `用途：${body.description?.trim() || "企业专用智能体"}；能力：${capText}；模型：${config.modelMode}。审批通过后智能体自动启用。`, "待审批", approverEmail, created!.id, now).run();
+      await audit(actor, "创建智能体", body.name, "待审批", `已提交给 ${approverEmail} 审批；能力：${capText}`);
+      return success({ ok: true, id: created!.id, status, pendingApproval: true, approverEmail, message: `智能体「${body.name.trim()}」已提交审批，审批人：${approverEmail}。通过后自动启用，可在「审批」页查看进度。` }, 201);
+    }
+    await audit(actor, "创建智能体", body.name, "成功", `${status}；模型：${config.modelMode}；能力：${capText}`);
+    return success({ ok: true, id: created!.id, status, message: `智能体「${body.name.trim()}」已${status === "草稿" ? "保存为草稿" : "创建并启用"}。` }, 201);
   } else if (body.type === "workflow") {
     const nodes = parseNodes(body.steps || "");
     log.info("创建工作流/持续任务", { name: body.name, loopType: body.loopType, triggerType: body.triggerType, nodesCount: nodes.length });

@@ -46,6 +46,7 @@ async function ensureSchemaOnce() {
   await ensureColumn(runtime.DB, "approval_requests", "approver_email", "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(runtime.DB, "approval_requests", "workflow_run_id", "INTEGER");
   await ensureColumn(runtime.DB, "approval_requests", "workflow_step_index", "INTEGER");
+  await ensureColumn(runtime.DB, "approval_requests", "agent_id", "INTEGER");
   await ensureColumn(runtime.DB, "org_units", "unit_type", "TEXT NOT NULL DEFAULT '部门'");
   await ensureColumn(runtime.DB, "org_units", "parent_id", "INTEGER");
   await ensureColumn(runtime.DB, "org_units", "manager_email", "TEXT NOT NULL DEFAULT ''");
@@ -83,13 +84,25 @@ async function ownerEmail() {
   return owner?.email || "";
 }
 
+// 返回「发起审批」弹窗可选的审批人列表。
+// 前端（Console.tsx）按扁平数组消费：approvalTargets.map/.find/.length，
+// 元素形如 { email, jobTitle, unitName, recommended }。此处务必返回数组，
+// 之前返回 { current, candidates } 对象会让弹窗里的 .map 抛错、整个弹窗白屏。
+// recommended：优先申请人的直属主管，其次所在部门负责人，作为下拉默认项。
 async function approvalTargets(email: string) {
   const rows = await runtime.DB.prepare(
     "SELECT m.email,m.job_title AS jobTitle,u.name AS unitName,m.direct_manager_email AS directManagerEmail,u.manager_email AS unitManagerEmail FROM org_members m LEFT JOIN org_units u ON u.id=m.unit_id WHERE m.status='在岗' ORDER BY u.sort_order,u.name,m.job_title,m.email"
   ).all<{ email: string; jobTitle: string; unitName: string; directManagerEmail: string; unitManagerEmail: string }>();
   const current = rows.results.find(item => item.email === email);
-  const candidates = rows.results.filter(item => item.email !== email);
-  return { current, candidates };
+  const recommend = (current?.directManagerEmail || current?.unitManagerEmail || "").trim().toLowerCase();
+  return rows.results
+    .filter(item => item.email !== email)
+    .map(item => ({
+      email: item.email,
+      jobTitle: item.jobTitle,
+      unitName: item.unitName || "未分配部门",
+      recommended: recommend ? item.email.trim().toLowerCase() === recommend : false,
+    }));
 }
 
 async function audit(actor: string, action: string, resource: string, result: string, detail: string) {
@@ -157,7 +170,7 @@ app.post("*", async (c) => {
   if (body.action === "decide") {
     const status = String(body.status || "");
     if (!["已通过", "已拒绝"].includes(status)) return fail("无效的审批结果。");
-    const item = await runtime.DB.prepare("SELECT requester,request_type AS requestType,title,status,approver_email AS approverEmail,workflow_run_id AS workflowRunId FROM approval_requests WHERE id=?").bind(Number(body.id)).first<{ requester: string; requestType: string; title: string; status: string; approverEmail: string; workflowRunId?: number }>();
+    const item = await runtime.DB.prepare("SELECT requester,request_type AS requestType,title,status,approver_email AS approverEmail,workflow_run_id AS workflowRunId,agent_id AS agentId FROM approval_requests WHERE id=?").bind(Number(body.id)).first<{ requester: string; requestType: string; title: string; status: string; approverEmail: string; workflowRunId?: number; agentId?: number }>();
     if (!item || item.status !== "待审批") return fail("该审批不存在或已经处理。", 409);
     if (item.approverEmail !== user.email && await ownerEmail() !== user.email && user.role !== ADMIN_ROLE) return fail("该审批已指定给其他账号，你无权处理。", 403);
     const claimed = await runtime.DB.prepare("UPDATE approval_requests SET status=?,approver=?,comment=?,decided_at=? WHERE id=? AND status='待审批'")
@@ -190,6 +203,11 @@ app.post("*", async (c) => {
             .bind(linked.conversationId, `工作流“${linked.workflowName}”的审批已被拒绝，流程已终止。${body.comment?.trim() ? `\n\n审批意见：${body.comment.trim()}` : ""}`, now).run();
         }
       }
+    }
+    // 创建智能体审批：通过则启用该智能体，拒绝则置为「已拒绝」（保留记录，不可使用）。
+    if (item.agentId) {
+      await runtime.DB.prepare("UPDATE ai_agents SET status=? WHERE id=? AND status='待审批'")
+        .bind(status === "已通过" ? "已启用" : "已拒绝", item.agentId).run();
     }
     await audit(user.email, "处理审批", item.title, status, body.comment?.trim() || "");
     return success({ ok: true, workflowRun }, 201);

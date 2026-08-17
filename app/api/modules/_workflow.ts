@@ -130,7 +130,7 @@ export async function judgeTrigger(
   }
 }
 
-async function workflowApprover(actor: string) {
+export async function workflowApprover(actor: string) {
   const member = await runtime.DB.prepare(
     "SELECT m.direct_manager_email AS directManagerEmail,u.manager_email AS unitManagerEmail FROM org_members m LEFT JOIN org_units u ON u.id=m.unit_id WHERE m.email=?"
   ).bind(actor).first<{ directManagerEmail: string; unitManagerEmail: string }>();

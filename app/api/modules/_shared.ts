@@ -47,6 +47,7 @@ async function ensureSchema() {
   await ensureColumn(runtime.DB, "approval_requests", "workflow_run_id", "INTEGER");
   await ensureColumn(runtime.DB, "approval_requests", "workflow_step_index", "INTEGER");
   await ensureColumn(runtime.DB, "approval_requests", "approver_email", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(runtime.DB, "approval_requests", "agent_id", "INTEGER");
   await ensureColumn(runtime.DB, "data_source_details", "model_mode", "TEXT NOT NULL DEFAULT 'auto'");
   await ensureColumn(runtime.DB, "data_source_details", "extract_fields", "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(runtime.DB, "data_collection_runs", "model_used", "TEXT NOT NULL DEFAULT ''");
