@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<!--
+  海芯 AI 平台 LaunchDaemon（系统级，root 运行 → 可绑定 :80、可写系统数据目录）。
+  安装到 /Library/LaunchDaemons/com.haixin.ai.plist，由 postinstall 用 launchctl bootstrap 加载。
+  KeepAlive=true：守护进程一旦退出，launchd 立即拉起（配合守护自身的子进程退避，双层抗崩溃）。
+  RunAtLoad=true：开机自启。ExecStart = 打包内 Node 运行 supervisor.mjs。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.haixin.ai</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/HaixinAI/runtime/bin/node</string>
+        <string>/Applications/HaixinAI/packaging/supervisor.mjs</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Applications/HaixinAI</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 崩溃后重启节流：至少间隔 5s，避免快速失败风暴（守护内部另有指数退避）。 -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- launchd 侧兜底日志；守护自身另写 /Library/Application Support/HaixinAI/logs。 -->
+    <key>StandardOutPath</key>
+    <string>/Library/Application Support/HaixinAI/logs/launchd-out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Application Support/HaixinAI/logs/launchd-err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

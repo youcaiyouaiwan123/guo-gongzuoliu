@@ -1,0 +1,4 @@
+# 构建产物与下载物：不入库（体积大，可由构建脚本重新生成）
+vendor/
+build/out/
+build/dist/

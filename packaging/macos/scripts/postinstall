@@ -1,0 +1,55 @@
+#!/bin/bash
+# 海芯 AI 平台 — macOS 安装后脚本（.pkg postinstall）。
+# 职责：建系统级数据目录 → 首启密钥（幂等）→ 装并加载 LaunchDaemon → 打开控制台。
+# 完全离线：所有运行时随包铺到 /Applications/HaixinAI，此处不下载任何东西。
+set -u
+
+PROGRAM_DIR="/Applications/HaixinAI"
+DATA_DIR="/Library/Application Support/HaixinAI"
+NODE="${PROGRAM_DIR}/runtime/bin/node"
+LABEL="com.haixin.ai"
+PLIST_SRC="${PROGRAM_DIR}/packaging/macos/com.haixin.ai.plist"
+PLIST_DST="/Library/LaunchDaemons/${LABEL}.plist"
+
+echo "[postinstall] 准备数据目录 ${DATA_DIR}…"
+mkdir -p "${DATA_DIR}/logs"
+# 数据目录归 root，仅 root 可读写（含密钥）
+chown -R root:wheel "${DATA_DIR}"
+chmod 700 "${DATA_DIR}"
+
+echo "[postinstall] 确保可执行位…"
+chmod +x "${NODE}" 2>/dev/null || true
+# workerd / esbuild 原生二进制的可执行位（cpio 解包一般保留，兜底再置一次）
+find "${PROGRAM_DIR}/node_modules/@cloudflare" -type f -name "workerd" -exec chmod +x {} \; 2>/dev/null || true
+find "${PROGRAM_DIR}/node_modules/@esbuild" -type f -name "esbuild" -exec chmod +x {} \; 2>/dev/null || true
+
+echo "[postinstall] 生成首启配置与管理员凭据（幂等）…"
+"${NODE}" "${PROGRAM_DIR}/packaging/first-run.mjs" || echo "[postinstall] 警告：首启配置生成返回非零（服务首次启动会再次尝试）。"
+
+echo "[postinstall] 安装 LaunchDaemon…"
+cp -f "${PLIST_SRC}" "${PLIST_DST}"
+chown root:wheel "${PLIST_DST}"
+chmod 644 "${PLIST_DST}"
+
+echo "[postinstall] 加载并启动服务…"
+# 先 bootout 再 bootstrap，保证升级时用新 plist
+launchctl bootout "system/${LABEL}" 2>/dev/null || true
+if ! launchctl bootstrap system "${PLIST_DST}" 2>/dev/null; then
+  # 旧系统回退到 load
+  launchctl load -w "${PLIST_DST}" 2>/dev/null || true
+fi
+launchctl enable "system/${LABEL}" 2>/dev/null || true
+launchctl kickstart -k "system/${LABEL}" 2>/dev/null || true
+
+# 打开控制台（在触发安装的登录用户上下文中打开浏览器）
+CONSOLE_UID=$(stat -f "%u" /dev/console 2>/dev/null || echo 0)
+if [ "${CONSOLE_UID}" -gt 0 ]; then
+  launchctl asuser "${CONSOLE_UID}" open "http://localhost" 2>/dev/null || true
+fi
+
+CREDS="${DATA_DIR}/FIRST-RUN-CREDENTIALS.txt"
+if [ -f "${CREDS}" ]; then
+  echo "[postinstall] 首次登录凭据见：${CREDS}"
+fi
+echo "[postinstall] 安装完成。访问 http://localhost 登录。"
+exit 0

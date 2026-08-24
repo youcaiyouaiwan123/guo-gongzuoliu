@@ -1,0 +1,23 @@
+#!/bin/bash
+# 海芯 AI 平台 — macOS 安装前脚本（.pkg preinstall）。
+# 若已安装（升级场景）：先优雅停掉旧 LaunchDaemon，避免文件占用与端口冲突。
+# 数据目录 /Library/Application Support/HaixinAI 绝不在此触碰。
+set -u
+
+LABEL="com.haixin.ai"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+
+echo "[preinstall] 检查既有服务…"
+if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+  echo "[preinstall] 停止既有服务 ${LABEL}…"
+  launchctl bootout "system/${LABEL}" 2>/dev/null || true
+  # 兼容旧系统的 unload 语义
+  launchctl unload "${PLIST}" 2>/dev/null || true
+  sleep 2
+fi
+
+# 兜底：清理可能残留的 workerd / wrangler 子进程（旧守护异常退出时的孤儿）
+pkill -f "HaixinAI/packaging/supervisor.mjs" 2>/dev/null || true
+pkill -f "HaixinAI/node_modules/@cloudflare/workerd" 2>/dev/null || true
+
+exit 0
