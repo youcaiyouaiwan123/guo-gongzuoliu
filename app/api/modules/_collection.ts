@@ -704,18 +704,36 @@ export async function collectSource(sourceId: number, actor: string, testOnly = 
     const autoTitle = `${source.name} ${new Date().toLocaleDateString("zh-CN")}`;
     const fileMeta = collectionFileMeta(autoTitle, outputFormat);
     let autoEnterpriseDocumentId: number | null = null;
+    let insertedKnowledge = false;
+    // \u53bb\u91cd\uff1a\u91c7\u96c6\u6b63\u6587\u4e0e\u8be5\u7528\u6237\u5df2\u6709\u77e5\u8bc6\u5b8c\u5168\u4e00\u81f4\u65f6\u4e0d\u518d\u91cd\u590d\u5165\u5e93\uff0c
+    // \u907f\u514d\u5b9a\u65f6/\u91cd\u590d\u8fd0\u884c\u540c\u4e00\uff08\u5c24\u5176\u662f\u9759\u6001\u7c98\u8d34\uff09\u6570\u636e\u6e90\u65f6\u628a\u76f8\u540c\u5185\u5bb9\u5806\u6210\u4e0a\u767e\u6761\u3002
     if (targetStore === "enterprise" || targetStore === "both") {
-      const createdDoc = await runtime.DB.prepare("INSERT INTO knowledge_documents(title,content,visibility,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id")
-        .bind(autoTitle, preview, source.visibility || "\u5168\u5458", fileMeta.filename, fileMeta.mimeType, "", source.targetCategory || "\u6570\u636e\u91c7\u96c6", `\u81ea\u52a8\u91c7\u96c6,${collectorModeLabels[collectorMode]},${outputFormatLabels[outputFormat]}`, 1, "\u624b\u52a8\u91c7\u96c6", "", "\u5df2\u7d22\u5f15", new TextEncoder().encode(preview).length, actor, started, started).first<{ id: number }>();
-      autoEnterpriseDocumentId = createdDoc?.id || null;
+      const existingDoc = await runtime.DB.prepare("SELECT id FROM knowledge_documents WHERE created_by=? AND category=? AND content=? ORDER BY id DESC LIMIT 1")
+        .bind(actor, source.targetCategory || "\u6570\u636e\u91c7\u96c6", preview).first<{ id: number }>();
+      if (existingDoc) {
+        autoEnterpriseDocumentId = existingDoc.id;
+      } else {
+        const createdDoc = await runtime.DB.prepare("INSERT INTO knowledge_documents(title,content,visibility,filename,mime_type,file_key,category,tags,version,update_mode,update_schedule,status,size_bytes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id")
+          .bind(autoTitle, preview, source.visibility || "\u5168\u5458", fileMeta.filename, fileMeta.mimeType, "", source.targetCategory || "\u6570\u636e\u91c7\u96c6", `\u81ea\u52a8\u91c7\u96c6,${collectorModeLabels[collectorMode]},${outputFormatLabels[outputFormat]}`, 1, "\u624b\u52a8\u91c7\u96c6", "", "\u5df2\u7d22\u5f15", new TextEncoder().encode(preview).length, actor, started, started).first<{ id: number }>();
+        autoEnterpriseDocumentId = createdDoc?.id || null;
+        insertedKnowledge = true;
+      }
     }
     if (targetStore === "personal" || targetStore === "both") {
-      await runtime.DB.prepare("INSERT INTO personal_knowledge(owner_email,title,content,source_type,conversation_id,sync_status,enterprise_document_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
-        .bind(actor, autoTitle, preview, `\u6570\u636e\u91c7\u96c6/${outputFormatLabels[outputFormat]} \u00b7 ${collectorModeLabels[collectorMode]}`, null, targetStore === "both" ? "\u5df2\u540c\u6b65\u4f01\u4e1a\u77e5\u8bc6" : "\u4ec5\u4e2a\u4eba", autoEnterpriseDocumentId, started, started).run();
+      const existingPersonal = await runtime.DB.prepare("SELECT id FROM personal_knowledge WHERE owner_email=? AND content=? ORDER BY id DESC LIMIT 1")
+        .bind(actor, preview).first<{ id: number }>();
+      if (!existingPersonal) {
+        await runtime.DB.prepare("INSERT INTO personal_knowledge(owner_email,title,content,source_type,conversation_id,sync_status,enterprise_document_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+          .bind(actor, autoTitle, preview, `\u6570\u636e\u91c7\u96c6/${outputFormatLabels[outputFormat]} \u00b7 ${collectorModeLabels[collectorMode]}`, null, targetStore === "both" ? "\u5df2\u540c\u6b65\u4f01\u4e1a\u77e5\u8bc6" : "\u4ec5\u4e2a\u4eba", autoEnterpriseDocumentId, started, started).run();
+        insertedKnowledge = true;
+      }
     }
-    const autoCreated = await runtime.DB.prepare("INSERT INTO data_collection_runs(source_id,source_name,actor,status,http_status,row_count,content_type,preview,model_used,target_store,output_format,collector_mode,created_at,published_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id").bind(source.id, source.name, actor, "\u5df2\u5165\u77e5\u8bc6\u5e93", httpStatus, rowCount, contentType, preview, modelUsed, targetStore, outputFormat, collectorMode, started, started).first<{ id: number }>();
+    const autoRunStatus = insertedKnowledge ? "\u5df2\u5165\u77e5\u8bc6\u5e93" : "\u5df2\u8df3\u8fc7\u00b7\u65e0\u65b0\u589e";
+    const autoCreated = await runtime.DB.prepare("INSERT INTO data_collection_runs(source_id,source_name,actor,status,http_status,row_count,content_type,preview,model_used,target_store,output_format,collector_mode,created_at,published_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id").bind(source.id, source.name, actor, autoRunStatus, httpStatus, rowCount, contentType, preview, modelUsed, targetStore, outputFormat, collectorMode, started, started).first<{ id: number }>();
     await runtime.DB.prepare("UPDATE data_sources SET status='\u5df2\u5165\u5e93',last_run_at=? WHERE id=?").bind(started, source.id).run();
-    await audit(actor, "\u8fd0\u884c\u91c7\u96c6", source.name, "\u6210\u529f", `\u91c7\u96c6${rowCount}\u6761\uff0c\u5df2\u81ea\u52a8\u8fdb\u5165${targetStoreLabels[targetStore]}\uff1b\u8fd0\u884c#${autoCreated!.id}\uff1b\u683c\u5f0f\uff1a${outputFormatLabels[outputFormat]}\uff1b\u65b9\u5f0f\uff1a${collectorModeLabels[collectorMode]}${describeRequestHeaders(requestHeaders) ? `\uff1b${describeRequestHeaders(requestHeaders)}` : ""}`);
+    await audit(actor, "\u8fd0\u884c\u91c7\u96c6", source.name, "\u6210\u529f", insertedKnowledge
+      ? `\u91c7\u96c6${rowCount}\u6761\uff0c\u5df2\u81ea\u52a8\u8fdb\u5165${targetStoreLabels[targetStore]}\uff1b\u8fd0\u884c#${autoCreated!.id}\uff1b\u683c\u5f0f\uff1a${outputFormatLabels[outputFormat]}\uff1b\u65b9\u5f0f\uff1a${collectorModeLabels[collectorMode]}${describeRequestHeaders(requestHeaders) ? `\uff1b${describeRequestHeaders(requestHeaders)}` : ""}`
+      : `\u91c7\u96c6${rowCount}\u6761\uff0c\u5185\u5bb9\u4e0e\u5df2\u6709\u77e5\u8bc6\u4e00\u81f4\uff0c\u53bb\u91cd\u8df3\u8fc7\u672a\u65b0\u589e\uff1b\u8fd0\u884c#${autoCreated!.id}`);
     return { ok: true, runId: autoCreated!.id, httpStatus, contentType, rowCount, modelUsed, targetStore, outputFormat, collectorMode, publishMode, preview: preview.slice(0, 1200) };
   } catch (error) {
     const message = explainCollectionError(error, httpStatus);

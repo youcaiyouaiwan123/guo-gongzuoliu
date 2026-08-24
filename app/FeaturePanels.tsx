@@ -3,6 +3,8 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshIcon, SparklesIcon } from "./components/icons";
 import { log } from "./features/logger";
+import { Pager } from "./features/Pager";
+import { usePaged } from "./features/usePaged";
 
 type NoticeSetter = (message: string) => void;
 
@@ -192,14 +194,24 @@ export function ArtifactUploadPanel({ onDone, setNotice }: { onDone: () => void;
 
 export function AdminSystemPanel({ setNotice }: { setNotice: NoticeSetter }) {
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [mail, setMail] = useState<{ active: boolean; host: string; sender: string }>({ active: false, host: "", sender: "" });
+  const [outbox, setOutbox] = useState<Array<{ id: number; email: string; subject: string; status: string; error: string; attempts: number; createdAt: string; sentAt: string }>>([]);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/admin/settings")
-      .then(response => response.ok ? response.json() : Promise.reject())
-      .then(data => setSettings(data.settings || {}))
-      .catch(() => undefined);
-  }, []);
+  async function reload() {
+    try {
+      const response = await fetch("/api/admin/settings");
+      if (!response.ok) return;
+      const data = await response.json();
+      setSettings(data.settings || {});
+      setMail(data.mail || { active: false, host: "", sender: "" });
+      setOutbox(data.outbox || []);
+    } catch {
+      /* 忽略：面板加载失败不阻断其它管理功能 */
+    }
+  }
+
+  useEffect(() => { void reload(); }, []);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -215,6 +227,17 @@ export function AdminSystemPanel({ setNotice }: { setNotice: NoticeSetter }) {
     setBusy(false);
   }
 
+  async function retryMail(id: number) {
+    const response = await fetch("/api/admin/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "retryMail", id }),
+    });
+    const data = await readResult(response);
+    setNotice(response.ok ? data.message || "邮件已重新入队。" : data.error || "重试失败。");
+    if (response.ok) await reload();
+  }
+
   return (
     <section className="featureCard">
       <div className="sectionTitle slimTitle">
@@ -222,6 +245,11 @@ export function AdminSystemPanel({ setNotice }: { setNotice: NoticeSetter }) {
           <h3>系统邮件 SMTP</h3>
         </div>
       </div>
+      <p className={`mailStatusLine ${mail.active ? "ok" : "warn"}`}>
+        {mail.active
+          ? `发信服务已由服务器环境启用（${mail.host}${mail.sender ? ` · ${mail.sender}` : ""}），验证码邮件由网关自动投递。`
+          : "发信服务未配置：请在服务器环境变量（MAIL_*）中设置发信账户，否则注册验证码无法送达。"}
+      </p>
       <form className="featureForm twoColumns" onSubmit={save}>
         <label>SMTP 服务器地址<input name="smtpHost" required defaultValue={settings.smtpHost || ""} placeholder="smtp.example.com" /></label>
         <label>SMTP 端口<input name="smtpPort" required defaultValue={settings.smtpPort || "465"} placeholder="465 / 587" /></label>
@@ -230,6 +258,32 @@ export function AdminSystemPanel({ setNotice }: { setNotice: NoticeSetter }) {
         <label className="wide">SMTP 访问凭证<input name="smtpCredential" type="password" placeholder={settings.smtpCredential ? "已保存；不修改可留空" : "授权码或密码"} /></label>
         <button disabled={busy}>{busy ? "保存中…" : "保存 SMTP 设置"}</button>
       </form>
+
+      <div className="sectionTitle slimTitle" style={{ marginTop: 24 }}>
+        <div><h3>邮件发送队列</h3></div>
+        <button type="button" className="outline" onClick={() => void reload()}>刷新</button>
+      </div>
+      {outbox.length ? (
+        <div className="mailOutboxTable">
+          <table>
+            <thead><tr><th>收件人</th><th>主题</th><th>状态</th><th>尝试</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody>
+              {outbox.map(row => (
+                <tr key={row.id}>
+                  <td>{row.email}</td>
+                  <td>{row.subject}</td>
+                  <td><span className={`mailStatus ${row.status === "已发送" ? "sent" : row.status === "发送失败" ? "failed" : "pending"}`}>{row.status}</span>{row.status === "发送失败" && row.error ? <small className="mailError">{row.error}</small> : null}</td>
+                  <td>{row.attempts}</td>
+                  <td>{new Date(row.sentAt || row.createdAt).toLocaleString("zh-CN")}</td>
+                  <td>{row.status === "发送失败" ? <button type="button" className="linkButton" onClick={() => void retryMail(row.id)}>重试</button> : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="mailOutboxEmpty">暂无发送记录。</p>
+      )}
     </section>
   );
 }
@@ -237,6 +291,7 @@ export function AdminSystemPanel({ setNotice }: { setNotice: NoticeSetter }) {
 export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNotice: NoticeSetter }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [documents, setDocuments] = useState<ContractDoc[]>([]);
+  const pagedDocs = usePaged(documents, 10);
   const [selectedId, setSelectedId] = useState<number | "">("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [selectedTemplates, setSelectedTemplates] = useState<number[]>([]);
@@ -350,7 +405,7 @@ export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNo
   }
 
   return (
-    <section className="contentPanel">
+    <section className="contentPanel contractPage">
       <div className="sectionTitle">
         <div><h2>合同中心</h2></div>
         <span className="policyBadge">{templates.length} 个模板</span>
@@ -384,7 +439,7 @@ export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNo
               <small>{templateUploadBusy ? "正在解析模板文件..." : "支持可复制文字的 PDF、Word（docx）、Markdown、TXT；解析后会自动填入下方模板框。"}</small>
             </label>
             <label className="wide">合同模板<textarea name="content" required rows={10} value={templateText} onChange={event => setTemplateText(event.target.value)} placeholder={"甲方：{{甲方}}\n乙方：{{乙方}}\n服务内容：海芯博创为甲方提供 {{服务内容}}。"} /></label>
-            <button>保存模板并识别变量</button>
+            <button className="primaryButton">保存模板并识别变量</button>
           </form>
         </section>
       )}
@@ -399,7 +454,7 @@ export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNo
           {variables.map(name => (
             <label key={name}>{name}<input value={values[name] || ""} onChange={event => setValues(current => ({ ...current, [name]: event.target.value }))} /></label>
           ))}
-          <button onClick={generateContract}>生成合同</button>
+          <button className="primaryButton" onClick={generateContract}>生成合同</button>
         </article>
 
         <article className="featureCard">
@@ -423,8 +478,9 @@ export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNo
         </div>
         <div className="auditTable">
           <div className="userRow head"><b>合同</b><b>生成时间</b><b>操作</b></div>
-          {documents.map(doc => <div className="userRow" key={doc.id}><label className="rowCheck"><input type="checkbox" checked={selectedDocs.includes(doc.id)} onChange={() => setSelectedDocs(current => current.includes(doc.id) ? current.filter(id => id !== doc.id) : [...current, doc.id])} /><span>{doc.title || doc.templateTitle}</span></label><span>{new Date(doc.createdAt).toLocaleString("zh-CN")}</span><a className="outlineLink" href={doc.downloadUrl} target="_blank">下载 PDF</a></div>)}
+          {pagedDocs.pageItems.map(doc => <div className="userRow" key={doc.id}><label className="rowCheck"><input type="checkbox" checked={selectedDocs.includes(doc.id)} onChange={() => setSelectedDocs(current => current.includes(doc.id) ? current.filter(id => id !== doc.id) : [...current, doc.id])} /><span>{doc.title || doc.templateTitle}</span></label><span>{new Date(doc.createdAt).toLocaleString("zh-CN")}</span><a className="outlineLink" href={doc.downloadUrl} target="_blank">下载 PDF</a></div>)}
         </div>
+        <Pager page={pagedDocs.page} pageSize={pagedDocs.pageSize} total={pagedDocs.total} onChange={pagedDocs.setPage} />
       </section>
     </section>
   );
@@ -432,6 +488,7 @@ export function ContractsPanel({ isAdmin, setNotice }: { isAdmin: boolean; setNo
 
 export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
   const [reports, setReports] = useState<MonitoringReport[]>([]);
+  const pagedReports = usePaged(reports, 10);
   const [current, setCurrent] = useState<MonitoringData | null>(null);
   const [fileText, setFileText] = useState("");
   const [selectedReports, setSelectedReports] = useState<number[]>([]);
@@ -494,7 +551,7 @@ export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
           <label>数据平台<select name="platform"><option>自动识别</option><option>抖音</option><option>Google Ads</option><option>天猫</option><option>小红书</option><option>其他</option></select></label>
           <label className="wide">上传数据文件<input type="file" accept=".csv,.tsv,.json,.txt" onChange={readFile} /></label>
           <label className="wide">或粘贴数据<textarea name="rawData" rows={8} placeholder="粘贴 CSV / JSON / 表格文本。系统会识别常见字段：花费、曝光、点击、转化、销售额、日期、计划、商品等。" /></label>
-          <button>生成监控看板</button>
+          <button type="submit">生成监控看板</button>
         </form>
       </section>
 
@@ -519,7 +576,7 @@ export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
         </p>}
         <div className="featureGrid">
           <div className="chartPanel"><h3>趋势图</h3><div className="chartBars">{trend.map((item, index) => <span key={index} style={{ height: `${Math.max(8, Number(item.spend ?? item.cost ?? 0) / maxSpend * 160)}px` }} title={`${item.date}: ${item.spend ?? item.cost}`} />)}</div></div>
-          <div className="chartPanel"><h3>柱状排行</h3><div className="rankBars">{bars.map((item) => <p key={item.name}><span>{item.name}</span><i style={{ width: `${Math.max(6, Number(item.value || 0) / maxBar * 100)}%` }} /><b>{formatNumber(item.value)}</b></p>)}</div></div>
+          <div className="chartPanel"><h3>柱状排行</h3><div className="rankBars">{bars.map((item, index) => <p key={`${item.name ?? "bar"}-${index}`}><span>{item.name}</span><i style={{ width: `${Math.max(6, Number(item.value || 0) / maxBar * 100)}%` }} /><b>{formatNumber(item.value)}</b></p>)}</div></div>
         </div>
       </section>}
 
@@ -530,8 +587,9 @@ export function MonitoringPanel({ setNotice }: { setNotice: NoticeSetter }) {
           {selectedReports.length > 0 && <button className="dangerButton" onClick={() => removeReports(selectedReports)}>删除所选</button>}
         </div>
         <div className="compactList">
-          {reports.map(item => <div key={item.id}><label className="rowCheck"><input type="checkbox" checked={selectedReports.includes(item.id)} onChange={() => setSelectedReports(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /><b>{item.title}</b></label><small>{item.platform} · {new Date(item.createdAt).toLocaleString("zh-CN")}</small><button onClick={() => setCurrent(safeJson<MonitoringData | null>(item.reportJson, null))}>查看</button></div>)}
+          {pagedReports.pageItems.map(item => <div key={item.id}><label className="rowCheck"><input type="checkbox" checked={selectedReports.includes(item.id)} onChange={() => setSelectedReports(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /><b>{item.title}</b></label><small>{item.platform} · {new Date(item.createdAt).toLocaleString("zh-CN")}</small><button onClick={() => setCurrent(safeJson<MonitoringData | null>(item.reportJson, null))}>查看</button></div>)}
         </div>
+        <Pager page={pagedReports.page} pageSize={pagedReports.pageSize} total={pagedReports.total} onChange={pagedReports.setPage} />
       </section>
       </div>
     </section>
@@ -564,6 +622,7 @@ function CleanMediaPanel() {
   const [imageModels, setImageModels] = useState<CleanImageModel[]>([]);
   const [textModels, setTextModels] = useState<TextModel[]>([]);
   const [images, setImages] = useState<CleanGeneratedImage[]>([]);
+  const pagedImages = usePaged(images, 12);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedModels, setSelectedModels] = useState<number[]>([]);
   const [selectedImages, setSelectedImages] = useState<number[]>([]);
@@ -889,7 +948,7 @@ function CleanMediaPanel() {
           <div className="inlineTitle"><div><h2>视频生成</h2></div></div>
           <div className="mediaVideoBody">
             <p className="videoHint">这里先保留企业短视频脚本与分镜需求，后续接入视频模型后可直接生成。</p>
-            <label>视频需求<textarea placeholder="例如：30 秒企业宣传短片，突出大模型销售与 AI 培训服务。" /></label>
+            <label>视频需求<textarea disabled placeholder="视频生成能力开发中，敬请期待。可先在下方生成图片。" /></label>
           </div>
         </section>
 
@@ -897,9 +956,10 @@ function CleanMediaPanel() {
           <div className="inlineTitle"><div><h2>生成结果</h2></div>{images.length > 0 && <div className="rowActions"><button className="outline" onClick={() => setSelectedImages(selectedImages.length === images.length ? [] : images.map(item => item.id))}>{selectedImages.length === images.length ? "取消全选" : "全选"}</button>{selectedImages.length > 0 && <button className="dangerButton" onClick={() => deleteImages(selectedImages)}>删除所选</button>}</div>}</div>
           <div className="mediaResultBody">
             {images.length === 0 ? <div className="compactEmptyState">还没有生成图片，填写需求后点击「生成图片」即可。</div> : <div className="imageResultGrid">
-              {images.map(item => <article key={item.id} className="imageResultItem"><label className="rowCheck"><input type="checkbox" checked={selectedImages.includes(item.id)} onChange={() => setSelectedImages(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /><b>{item.provider} · {item.model}</b></label>{imageSrc(item) ? <img src={imageSrc(item)} alt={item.prompt} /> : null}<p>{item.prompt}</p><small>{item.size} · {item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : "时间未知"}</small><div className="rowActions">{imageSrc(item) && <a className="outline" href={imageSrc(item)} download={`haixin-image-${item.id}.png`}>下载</a>}<button className="outline" onClick={() => navigator.clipboard?.writeText(imageSrc(item))}>复制地址</button><button className="dangerButton" onClick={() => deleteImages([item.id])}>删除</button></div></article>)}
+              {pagedImages.pageItems.map(item => <article key={item.id} className="imageResultItem"><label className="rowCheck"><input type="checkbox" checked={selectedImages.includes(item.id)} onChange={() => setSelectedImages(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /><b>{item.provider} · {item.model}</b></label>{imageSrc(item) ? <img src={imageSrc(item)} alt={item.prompt} /> : null}<p>{item.prompt}</p><small>{item.size} · {item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : "时间未知"}</small><div className="rowActions">{imageSrc(item) && <a className="outline" href={imageSrc(item)} download={`haixin-image-${item.id}.png`}>下载</a>}<button className="outline" onClick={() => navigator.clipboard?.writeText(imageSrc(item))}>复制地址</button><button className="dangerButton" onClick={() => deleteImages([item.id])}>删除</button></div></article>)}
             </div>}
           </div>
+          <Pager page={pagedImages.page} pageSize={pagedImages.pageSize} total={pagedImages.total} onChange={pagedImages.setPage} />
         </section>
       </div>
     </section>

@@ -19,6 +19,7 @@ export interface ProfilePanelProps {
 export default function ProfilePanel({ profileInfo, userEmail, displayName, appRole, role, passwordForm, setPasswordForm, setNotice }: ProfilePanelProps) {
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (passwordForm.newPassword.length < 8) return setNotice("新密码至少 8 位");
     if (passwordForm.newPassword !== passwordForm.confirmPassword) return setNotice("两次输入的新密码不一致");
     const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "changePassword", ...passwordForm }) });
     const data = await response.json();

@@ -397,7 +397,9 @@ header {
   }
 }
 @media (max-width: 1100px) {
-  .chatLayout,
+  .chatLayout {
+    grid-template-columns: 200px minmax(0, 1fr) minmax(200px, 260px);
+  }
   .chatLayout.insightCollapsed {
     grid-template-columns: 200px minmax(0, 1fr) 48px;
   }
@@ -450,9 +452,6 @@ header {
   }
   .conversationPanel {
     max-height: 160px;
-  }
-  .conversationList {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .chatPanel {
     min-height: 340px;
@@ -889,6 +888,82 @@ header {
 .featureForm .wide,
 .wide {
   grid-column: 1 / -1;
+}
+.mailStatusLine {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.mailStatusLine.ok {
+  color: #1c7a48;
+  background: rgba(34, 160, 90, .1);
+  border: 1px solid rgba(34, 160, 90, .25);
+}
+.mailStatusLine.warn {
+  color: #9a6010;
+  background: #fff3dc;
+  border: 1px solid #f0d9a8;
+}
+.mailOutboxTable {
+  overflow-x: auto;
+}
+.mailOutboxTable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mailOutboxTable th,
+.mailOutboxTable td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.mailOutboxTable th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.mailStatus {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mailStatus.sent {
+  color: #1c7a48;
+  background: rgba(34, 160, 90, .12);
+}
+.mailStatus.failed {
+  color: #b23b3b;
+  background: rgba(214, 69, 69, .12);
+}
+.mailStatus.pending {
+  color: #9a6010;
+  background: #fff3dc;
+}
+.mailError {
+  display: block;
+  margin-top: 4px;
+  color: #b23b3b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.mailOutboxTable .linkButton {
+  border: 0;
+  background: none;
+  color: var(--green);
+  font-weight: 700;
+  padding: 0;
+}
+.mailOutboxEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .uploadButton {
   display: inline-flex;

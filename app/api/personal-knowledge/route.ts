@@ -160,15 +160,29 @@ app.post("*", async (c) => {
   }, 201);
 });
 
-// PATCH /api/personal-knowledge — 同步个人知识到企业知识
+// PATCH /api/personal-knowledge — 编辑 / 同步个人知识到企业知识
 app.patch("*", async (c) => {
   const { user } = c.var;
   await ensureSchema();
-  const body = await c.req.json() as { id?: number; visibility?: string; category?: string; tags?: string };
+  const body = await c.req.json() as { id?: number; action?: string; title?: string; content?: string; visibility?: string; category?: string; tags?: string };
   const item = await runtime.DB.prepare("SELECT id,title,content,source_type AS sourceType,sync_status AS syncStatus FROM personal_knowledge WHERE id=? AND owner_email=?")
     .bind(Number(body.id), user.email)
     .first<{ id: number; title: string; content: string; sourceType: string; syncStatus: string }>();
   if (!item) return fail("个人知识不存在或无权操作。", 404);
+
+  if (body.action === "edit") {
+    const title = body.title?.trim() ?? item.title;
+    const content = body.content?.trim() ?? item.content;
+    if (!title || !content) return fail("知识名称和内容不能为空。", 400);
+    const now = new Date().toISOString();
+    const saved = await runtime.DB.prepare(`UPDATE personal_knowledge SET title=?,content=?,updated_at=? WHERE id=? AND owner_email=? RETURNING ${fields}`)
+      .bind(title, content.slice(0, 500_000), now, item.id, user.email)
+      .first();
+    await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+      .bind(user.email, "编辑个人知识", title, "成功", "已更新个人知识内容。", now)
+      .run();
+    return success({ personalKnowledge: saved, message: "已保存修改。" });
+  }
 
   const membership = await getMembership(user.email);
   const visibility = user.role === ADMIN_ROLE ? (body.visibility || "全员") : "部门";

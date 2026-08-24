@@ -261,15 +261,15 @@ export default function ConnectorsPanel({ connectors, setConnectors, testingConn
         <p>统一管理飞书、钉钉、企业微信的机器人接入、网关配置和默认模型。</p>
       </div>
       <div className="connectorsHeaderStats">
-        <div><WaveIcon style={{ width: 14, height: 14 }} /><b>{liveCount}<span>/{connectors.length}</span></b><small>链路在线</small></div>
-        <div><RefreshIcon style={{ width: 14, height: 14 }} /><b>{configuredCount}<span>/{connectors.length}</span></b><small>已配置</small></div>
+        <div><WaveIcon style={{ width: 14, height: 14 }} /><b>{liveCount}<span>/{platformDefs.length}</span></b><small>链路在线</small></div>
+        <div><RefreshIcon style={{ width: 14, height: 14 }} /><b>{configuredCount}<span>/{platformDefs.length}</span></b><small>已配置</small></div>
         <div><MessageIcon style={{ width: 14, height: 14 }} /><b>{totalInbound + totalOutbound}</b><small>累计消息</small></div>
       </div>
       <button className="outline connectorsRefreshBtn" onClick={loadConnectors}><RefreshIcon style={{ width: 12, height: 12 }} /> 刷新状态</button>
     </header>
 
     <div className="connectorsTabs">
-      <button className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}>平台接入<span className="tabBadge">{configuredCount}/{connectors.length}</span></button>
+      <button className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}>平台接入<span className="tabBadge">{configuredCount}/{platformDefs.length}</span></button>
       <button className={tab === "gateway" ? "active" : ""} onClick={() => setTab("gateway")}>通道网关<span className="tabBadge">{connectors.filter(c => c.connectionMode === "long_connection" && c.gatewayConfig).length}</span></button>
       <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>机器人模型<span className="tabBadge">{connectors.length}</span></button>
     </div>
@@ -328,7 +328,7 @@ export default function ConnectorsPanel({ connectors, setConnectors, testingConn
           const dirty = draft !== saved;
           return <article key={item.id} className="robotModelCardNew">
             <div className="robotModelCardNewHead">
-              <span className={`connectorLogo connector-${item.id}`}>{item.name.slice(0, 1)}</span>
+              <span className={`connectorLogo ${connectorClassName(String(item.id))}`}>{item.name.slice(0, 1)}</span>
               <div>
                 <h3>{item.name}机器人</h3>
                 <p>{item.configured ? `${item.name}机器人单独选择模型，不影响其它平台，也不影响智能助手聊天。` : `请先在「平台接入」完成${item.name}平台接入。`}</p>

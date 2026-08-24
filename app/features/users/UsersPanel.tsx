@@ -4,6 +4,8 @@ import { FormEvent, useMemo, useState } from "react";
 import { AdminSystemPanel } from "../../FeaturePanels";
 import type { ManagedUser } from "../shared-types";
 import { PlusIcon, RefreshIcon, WaveIcon, BellIcon, ClipboardIcon, MessageIcon, TrashIcon, SparklesIcon, DiamondIcon } from "../../components/icons";
+import { Pager } from "../Pager";
+import { usePaged } from "../usePaged";
 
 export interface UsersPanelProps {
   users: ManagedUser[];
@@ -77,6 +79,7 @@ export default function UsersPanel({ users, setNotice, loadSession }: UsersPanel
 
   const allSelected = filtered.length > 0 && filtered.every(u => selected.has(u.email));
   const someSelected = filtered.some(u => selected.has(u.email));
+  const { pageItems: pagedUsers, page, pageSize, total, setPage } = usePaged(filtered, 20);
 
   function toggle(email: string) {
     setSelected(prev => {
@@ -97,14 +100,20 @@ export default function UsersPanel({ users, setNotice, loadSession }: UsersPanel
 
   async function saveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+    // 先存下表单引用：await 之后 React 会把合成事件的 currentTarget 置空，
+    // 若延后再取 event.currentTarget.reset() 会抛错，导致下面的 setBusy(false) 跑不到、按钮永久禁用。
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form).entries());
     if (!values.email) return;
     setBusy(true);
-    const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-    const data = await response.json();
-    setNotice(response.ok ? data.message || "账号角色已保存" : data.error || "保存失败");
-    if (response.ok) { event.currentTarget.reset(); await loadSession(); }
-    setBusy(false);
+    try {
+      const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+      const data = await response.json();
+      setNotice(response.ok ? data.message || "账号角色已保存" : data.error || "保存失败");
+      if (response.ok) { form.reset(); await loadSession(); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function removeUser(email: string) {
@@ -249,7 +258,7 @@ export default function UsersPanel({ users, setNotice, loadSession }: UsersPanel
           <h3>没有匹配的账号</h3>
           <p>{keyword ? `没有邮箱包含 "${keyword}" 的账号` : "该角色下还没有任何账号"}</p>
         </div>}
-        {filtered.map(user => {
+        {pagedUsers.map(user => {
           const isAdmin = user.role === "管理员";
           const checked = selected.has(user.email);
           return <div key={user.email} className={`usersTableRow ${checked ? "isSelected" : ""} ${isAdmin ? "isAdmin" : "isEmployee"}`}>
@@ -282,6 +291,7 @@ export default function UsersPanel({ users, setNotice, loadSession }: UsersPanel
           </div>;
         })}
       </div>
+      <Pager page={page} pageSize={pageSize} total={total} onChange={setPage} />
 
       <div className="usersSmtpWrap">
         <AdminSystemPanel setNotice={setNotice} />

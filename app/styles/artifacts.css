@@ -180,6 +180,13 @@
   min-height: 0;
   overflow: hidden;
 }
+/* 网格可用区：填满 header 与分页条之间的剩余高度。JS 量的就是这块的 clientWidth/Height，
+   据此算出每页放几列几行，使网格正好铺满、不溢出，因此这里 overflow 保持 hidden 不出滚动条。 */
+.artifactGridViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 .artifactsHeader {
   flex: 0 0 auto;
   display: flex;
@@ -198,20 +205,20 @@
 }
 
 .artifactGrid {
-  flex: 1 1 auto;
-  min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  grid-auto-rows: max-content;
+  /* 固定行高，使每张卡片高度统一、行数可被 JS 精确计算。
+     此值必须与 Console.tsx 自适应效应里的 CARD_H 保持一致（当前 236px）。 */
+  grid-auto-rows: 236px;
   gap: 12px;
-  overflow-y: auto;
   align-content: start;
-  padding: 2px 4px 2px 0;
+  overflow: visible;
 }
 
 /* 卡片 */
 .artifactCard {
   position: relative;
+  height: 100%;  /* 填满固定行高，卡片高度统一、内容超出由 overflow:hidden 收口，不撑破网格 */
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -291,6 +298,8 @@
   font-size: 11px;
   line-height: 1.5;
   color: #4a5d56;
+  flex: 1 1 auto;  /* 撑开剩余空间，把 meta/actions 压到卡片底部，卡片间对齐 */
+  min-height: 0;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;

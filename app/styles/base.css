@@ -141,6 +141,60 @@
     monospace;
   color: var(--ink);
 }
+.clickableCard {
+  cursor: pointer;
+}
+.knowledgeDetailModal .knowledgeDetailMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f6f9f7;
+}
+.knowledgeDetailModal .knowledgeDetailMeta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.knowledgeDetailModal .knowledgeDetailMeta dt {
+  font-size: 11px;
+  color: var(--muted, #6b7c74);
+}
+.knowledgeDetailModal .knowledgeDetailMeta dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+  word-break: break-word;
+}
+.knowledgeEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 64vh;
+  overflow: auto;
+}
+.knowledgeEditForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.knowledgeEditForm input,
+.knowledgeEditForm select,
+.knowledgeEditForm textarea {
+  font: inherit;
+}
+.knowledgeEditForm textarea {
+  resize: vertical;
+}
+.knowledgeEditForm small {
+  color: var(--muted, #6b7c74);
+  font-size: 11px;
+}
 .composer button:disabled {
   opacity: 0.5;
   cursor: wait;
@@ -717,6 +771,10 @@
   font-size: 9px;
   color: #4d6157;
 }
+/* 节点内的选择器（选择知识库/数据源/智能体、本步骤模型）铺满内容列，避免挤进 28px 末列竖排。 */
+.builderNode > .workflowResourceSelect {
+  grid-column: 2/4;
+}
 .promptStructureGrid input,
 .workflowResourceSelect select,
 .workflowDirectRequest textarea {
@@ -732,6 +790,106 @@
   margin-top: 6px;
   color: var(--muted);
   font-size: 8px;
+}
+/* 知识节点「指定文件」勾选清单 */
+.workflowKnowledgePick .knowledgePickTitle {
+  display: block;
+}
+.knowledgePickTabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.knowledgePickTabs button {
+  padding: 2px 10px;
+  font-size: 9px;
+  border: 1px solid var(--line, #d8e2dc);
+  border-radius: 999px;
+  background: #fff;
+  color: #4d6157;
+  cursor: pointer;
+}
+.knowledgePickTabs button.active {
+  background: var(--brand, #1f7a5a);
+  border-color: var(--brand, #1f7a5a);
+  color: #fff;
+}
+.knowledgePickBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.knowledgePickBar button {
+  padding: 1px 8px;
+  font-size: 8px;
+  border: 1px solid var(--line, #d8e2dc);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.knowledgePickBar small {
+  margin: 0;
+  color: var(--muted);
+}
+.knowledgePickList {
+  margin-top: 4px;
+  max-height: 168px;
+  overflow: auto;
+  border: 1px solid var(--line, #d8e2dc);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #fff;
+}
+.knowledgePickGroup {
+  margin: 2px 0;
+}
+.knowledgePickGroup > b {
+  display: block;
+  font-size: 8px;
+  color: var(--muted);
+  margin: 4px 0 2px;
+}
+.knowledgePickGroup > em {
+  display: block;
+  font-size: 8px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+.knowledgePickList .knowledgePickItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  margin: 0;
+  font-size: 9px;
+  color: #2d3d36;
+  cursor: pointer;
+}
+.knowledgePickList .knowledgePickItem input {
+  margin: 0;
+  flex: none;
+  width: auto;
+  padding: 0;
+}
+.knowledgePickList .knowledgePickItem span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+/* 持续任务·主动制「数据源（可选）」下的知识库文件选择器 */
+.continuousKnowledgePick {
+  color: #40544b;
+  font-size: 10px;
+  font-weight: 700;
+}
+.continuousKnowledgePick > small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 400;
 }
 @media (max-width: 620px) {
   .modelSummary,
@@ -885,6 +1043,30 @@ button {
   display: grid;
   gap: 14px;
 }
+.emailWithAction {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.emailWithAction input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.emailWithAction .ghostAction {
+  flex: none;
+  white-space: nowrap;
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 14px;
+}
+.emailWithAction .ghostAction:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
 .noticeLine {
   margin: 0;
   padding: 10px 12px;
@@ -894,6 +1076,45 @@ button {
   color: var(--green);
   font-size: 12px;
   font-weight: 700;
+}
+.pwdStrength {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -6px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pwdStrength i {
+  flex: none;
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: #e2e8e4;
+}
+.pwdStrength.weak {
+  color: var(--red);
+}
+.pwdStrength.weak i {
+  background: linear-gradient(90deg, var(--red) 33%, #e2e8e4 33%);
+}
+.pwdStrength.medium {
+  color: var(--amber);
+}
+.pwdStrength.medium i {
+  background: linear-gradient(90deg, var(--amber) 66%, #e2e8e4 66%);
+}
+.pwdStrength.strong {
+  color: var(--green);
+}
+.pwdStrength.strong i {
+  background: var(--green);
+}
+.pwdMismatch {
+  margin: -6px 0 0;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 600;
 }
 .loginCard > small {
   display: block;

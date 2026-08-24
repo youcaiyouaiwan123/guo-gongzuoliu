@@ -88,4 +88,6 @@ exec npx wrangler dev --local --config "$CONFIG_FILE" --persist-to "$PERSIST_DIR
   --var "MODEL_BASE_URL:${MODEL_BASE_URL:-https://claudecc.top}" \
   --var "MODEL_NAME:${MODEL_NAME:-claude-opus-4-5-20251101}" \
   --var "MODEL_RELAY_URL:${MODEL_RELAY_URL:-}" \
-  --var "COLLECTOR_PROXY_URL:${COLLECTOR_PROXY_URL:-}"
+  --var "COLLECTOR_PROXY_URL:${COLLECTOR_PROXY_URL:-}" \
+  --var "MAIL_HOST:${MAIL_HOST:-}" \
+  --var "MAIL_SENDER:${MAIL_SENDER:-}"

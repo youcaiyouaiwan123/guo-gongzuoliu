@@ -1,5 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import tls from "node:tls";
 import * as lark from "@larksuiteoapi/node-sdk";
 import { DWClient, TOPIC_ROBOT } from "dingtalk-stream";
 import AiBot, { generateReqId } from "@wecom/aibot-node-sdk";
@@ -53,6 +54,127 @@ async function tickSchedules() {
   } catch (error) {
     // 调度失败不该影响长连接网关本职工作，记一行就够。
     console.error(`[schedule] tick error: ${error.message}`);
+  }
+}
+
+// ── 邮件出站 ───────────────────────────────────────────────────────────────
+// worker（wrangler dev --local）没有可靠的出站 SMTP，注册验证码只是写进 mail_outbox。
+// 本进程常驻、本来就每隔几秒访问 app，顺带把待发邮件取走用 node:tls 直连 SMTP 投出去。
+// 发信凭据只来自服务器环境变量（MAIL_*，落在 /opt/haixin-ai/shared/.env），不进 DB、不进仓库。
+
+const b64 = (value) => Buffer.from(String(value), "utf8").toString("base64");
+
+// 极简 SMTP over 隐式 TLS（465）客户端。按 EHLO→AUTH LOGIN→MAIL/RCPT/DATA 顺序推进，
+// 每一步校验期望状态码，任一步不符即 reject。正文以 text/html 发出（验证码邮件已是 HTML）。
+function sendMail({ host, port, user, pass, fromEmail, fromName, to, subject, html }) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (err) => {
+      if (done) return;
+      done = true;
+      try { socket.destroy(); } catch { /* already closed */ }
+      err ? reject(err) : resolve();
+    };
+    const socket = tls.connect({ host, port: Number(port), servername: host });
+    socket.setEncoding("utf8");
+    socket.setTimeout(20_000, () => finish(new Error("SMTP 超时")));
+    socket.on("error", (err) => finish(err));
+
+    const fromHeader = fromName ? `=?UTF-8?B?${b64(fromName)}?= <${fromEmail}>` : fromEmail;
+    const body = String(html || "")
+      .replace(/\r?\n/g, "\r\n")
+      .replace(/^\./gm, ".."); // dot-stuffing：正文里行首的 . 需转义，避免被当成结束符
+    const message = [
+      `From: ${fromHeader}`,
+      `To: ${to}`,
+      `Subject: =?UTF-8?B?${b64(subject)}?=`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/html; charset=UTF-8",
+      "Content-Transfer-Encoding: 8bit",
+      "",
+      body,
+      ".",
+      "",
+    ].join("\r\n");
+
+    // 每步：期望状态码 + 命中后要发的命令（返回 null 表示自己已写入原始数据）。
+    const steps = [
+      { expect: "220", cmd: () => "EHLO haixin-gateway" },
+      { expect: "250", cmd: () => "AUTH LOGIN" },
+      { expect: "334", cmd: () => b64(user) },
+      { expect: "334", cmd: () => b64(pass) },
+      { expect: "235", cmd: () => `MAIL FROM:<${fromEmail}>` },
+      { expect: "250", cmd: () => `RCPT TO:<${to}>` },
+      { expect: "250", cmd: () => "DATA" },
+      { expect: "354", cmd: () => { socket.write(message); return null; } },
+      { expect: "250", cmd: () => "QUIT" },
+    ];
+    let step = 0;
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      // 只在收到完整行（以 CRLF 结尾）且末行是「三位数字+空格」的终结行时才推进，
+      // 兼容 EHLO 的 `250-...` 多行响应。
+      if (!buffer.endsWith("\r\n")) return;
+      const lines = buffer.split("\r\n").filter(Boolean);
+      const last = lines[lines.length - 1] || "";
+      if (!/^\d{3} /.test(last)) return;
+      buffer = "";
+      const current = steps[step];
+      if (last.slice(0, 3) !== current.expect) {
+        finish(new Error(`SMTP 期望 ${current.expect}，实际：${last.slice(0, 120)}`));
+        return;
+      }
+      const isLast = step === steps.length - 1;
+      const out = current.cmd();
+      step += 1;
+      if (out != null) socket.write(`${out}\r\n`);
+      if (isLast) { try { socket.end(); } catch { /* ignore */ } finish(null); }
+    });
+  });
+}
+
+async function drainMailOutbox() {
+  const accountsUrl = process.env.HAIXIN_GATEWAY_ACCOUNTS_URL;
+  const secret = process.env.HAIXIN_GATEWAY_ADMIN_SECRET?.trim();
+  const host = process.env.MAIL_HOST?.trim();
+  const user = process.env.MAIL_USER?.trim();
+  const pass = process.env.MAIL_PASS;
+  if (!accountsUrl || !secret || !host || !user || !pass) return;
+  const url = accountsUrl.replace(/\/accounts(?:\/)?$/, "/mail");
+  if (url === accountsUrl) return;
+  const cfg = {
+    host,
+    port: process.env.MAIL_PORT?.trim() || "465",
+    user,
+    pass,
+    fromEmail: process.env.MAIL_FROM?.trim() || user,
+    fromName: "海芯博创",
+  };
+  try {
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+    if (!resp.ok) { console.error(`[mail] fetch failed HTTP ${resp.status}`); return; }
+    const data = await resp.json().catch(() => null);
+    const pending = data?.pending || [];
+    if (!pending.length) return;
+    const results = [];
+    for (const mail of pending) {
+      try {
+        await sendMail({ ...cfg, to: mail.email, subject: mail.subject, html: mail.content });
+        results.push({ id: mail.id, ok: true });
+        console.log(`[mail] sent #${mail.id} → ${mail.email}`);
+      } catch (error) {
+        results.push({ id: mail.id, ok: false, error: error.message });
+        console.error(`[mail] send #${mail.id} failed: ${error.message}`);
+      }
+    }
+    await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ results }),
+    }).catch((error) => console.error(`[mail] report error: ${error.message}`));
+  } catch (error) {
+    console.error(`[mail] drain error: ${error.message}`);
   }
 }
 
@@ -507,6 +629,10 @@ setInterval(syncAccounts, 15_000).unref();
 // 而本进程本来就常驻、本来就每 15 秒访问一次 app，顺带把这一下也带上，
 // 免得为了"每天 9 点跑个日报"再单起一个容器。失败只记日志：调度不该拖垮长连接网关。
 setInterval(() => { void tickSchedules(); }, 60_000).unref();
+
+// 邮件出站：验证码有效期 10 分钟，取走要快，隔 10 秒扫一次队列。
+void drainMailOutbox();
+setInterval(() => { void drainMailOutbox(); }, 10_000).unref();
 
 setInterval(() => {
   for (const { account } of running.values()) void heartbeat(account);

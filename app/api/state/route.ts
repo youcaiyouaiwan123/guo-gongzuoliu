@@ -297,15 +297,71 @@ app.delete("*", async (c) => {
   return success({ ok: true, message: `已删除 ${deletedTitles.length} 条知识资料。`, deleted: deletedTitles.length });
 });
 
-// PATCH /api/state — 同步知识库文档
+// PATCH /api/state — 同步 / 编辑知识库文档
 app.patch("*", async (c) => {
   const { user } = c.var;
   await ensureSchema();
   const denied = await authorizeCapability(runtime.DB, user, "manage_knowledge");
   if (denied) return denied;
-  const body = await c.req.json() as { id?: number; action?: string };
-  if (body.action !== "sync" || !body.id) return fail("操作无效。", 400);
+  const body = await c.req.json() as { id?: number; action?: string; title?: string; content?: string; category?: string; visibility?: string; departmentId?: number; tags?: string; updateMode?: string; updateSchedule?: string };
+  if (!body.id) return fail("操作无效。", 400);
   const now = new Date().toISOString();
+
+  if (body.action === "edit") {
+    const existing = await runtime.DB.prepare("SELECT version,content,created_by AS createdBy FROM knowledge_documents WHERE id=?")
+      .bind(body.id)
+      .first<{ version: number; content: string; createdBy: string }>();
+    if (!existing) return fail("资料不存在。", 404);
+    // 与 DELETE 对称：只有创建者或管理员能改这条资料。
+    if (user.role !== ADMIN_ROLE && existing.createdBy !== user.email) return fail("无权编辑该资料。", 403);
+
+    const title = body.title?.trim();
+    if (title !== undefined && !title) return fail("资料名称不能为空。", 400);
+
+    const visibility = body.visibility?.trim() || undefined;
+    const membership = await getMembership(user.email);
+    // 可见范围＝部门时按 POST 逻辑确定归属：管理员可指定，其余用本人部门。
+    let departmentId: number | null | undefined;
+    if (visibility === "部门") {
+      departmentId = user.role === ADMIN_ROLE ? (Number(body.departmentId) || null) : (membership?.unitId || null);
+      if (!departmentId) return fail("请先加入部门，或由管理员选择资料所属部门。", 400);
+    } else if (visibility !== undefined) {
+      // 切到非部门可见范围时清掉部门归属，避免残留旧部门。
+      departmentId = null;
+    }
+
+    // 正文有实质变化才升版本、刷新大小与解析状态；只改元数据则版本不动。
+    const contentChanged = body.content !== undefined && body.content.trim() !== (existing.content || "").trim();
+    const nextContent = contentChanged ? body.content!.trim() : undefined;
+
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (title !== undefined) { sets.push("title=?"); binds.push(title); }
+    if (body.category !== undefined) { sets.push("category=?"); binds.push(body.category.trim() || "未分类"); }
+    if (visibility !== undefined) { sets.push("visibility=?"); binds.push(visibility); }
+    if (departmentId !== undefined) { sets.push("department_id=?"); binds.push(departmentId); }
+    if (body.tags !== undefined) { sets.push("tags=?"); binds.push(body.tags.trim()); }
+    if (body.updateMode !== undefined) { sets.push("update_mode=?"); binds.push(body.updateMode.trim() || "手动更新"); }
+    if (body.updateSchedule !== undefined) { sets.push("update_schedule=?"); binds.push(body.updateSchedule.trim()); }
+    if (contentChanged) {
+      sets.push("content=?"); binds.push(nextContent);
+      sets.push("size_bytes=?"); binds.push(new TextEncoder().encode(nextContent).byteLength);
+      sets.push("status=?"); binds.push(nextContent ? "已解析" : "待解析");
+      sets.push("version=version+1");
+    }
+    if (!sets.length) return fail("没有需要更新的内容。", 400);
+    sets.push("updated_at=?"); binds.push(now);
+
+    const saved = await runtime.DB.prepare(`UPDATE knowledge_documents SET ${sets.join(",")} WHERE id=? RETURNING ${fields}`)
+      .bind(...binds, body.id)
+      .first();
+    await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
+      .bind(user.email, "编辑知识", String(body.id), "成功", contentChanged ? `已更新正文，版本升至 V${existing.version + 1}。` : "已更新资料信息。", now)
+      .run();
+    return success({ document: saved, message: contentChanged ? `已保存，版本更新为 V${existing.version + 1}。` : "已保存修改。" });
+  }
+
+  if (body.action !== "sync") return fail("操作无效。", 400);
   await runtime.DB.prepare("UPDATE knowledge_documents SET status=CASE WHEN content='' THEN '待解析' ELSE '已解析' END,updated_at=? WHERE id=?").bind(now, body.id).run();
   await runtime.DB.prepare("INSERT INTO audit_logs(actor,action,resource,result,detail,created_at) VALUES(?,?,?,?,?,?)")
     .bind(user.email, "同步知识", String(body.id), "成功", "已检查更新并刷新检索状态。", now)

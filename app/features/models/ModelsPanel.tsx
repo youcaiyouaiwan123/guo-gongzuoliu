@@ -18,8 +18,8 @@ export interface ModelsPanelProps {
   setShowCustomModel: React.Dispatch<React.SetStateAction<boolean>>;
   editingModel: ModelConnection | null;
   setEditingModel: React.Dispatch<React.SetStateAction<ModelConnection | null>>;
-  testingModel: boolean;
-  setTestingModel: React.Dispatch<React.SetStateAction<boolean>>;
+  testingModelId: number | null;
+  setTestingModelId: React.Dispatch<React.SetStateAction<number | null>>;
   selectedModelConnectionIds: number[];
   setSelectedModelConnectionIds: React.Dispatch<React.SetStateAction<number[]>>;
   modelMode: string;
@@ -32,13 +32,17 @@ export interface ModelsPanelProps {
   toggleSelectedId: (ids: number[], setIds: (value: number[]) => void, id: number) => void;
 }
 
-export default function ModelsPanel({ modelStatus, selectedPresetModels, setSelectedPresetModels, presetApiKey, setPresetApiKey, addingPresetModels, setAddingPresetModels, showCustomModel, setShowCustomModel, editingModel, setEditingModel, testingModel, setTestingModel, selectedModelConnectionIds, setSelectedModelConnectionIds, modelMode, setModelMode, setNotice, setTab, loadModelStatus, deleteBatch, setAllSelectedIds, toggleSelectedId }: ModelsPanelProps) {
+export default function ModelsPanel({ modelStatus, selectedPresetModels, setSelectedPresetModels, presetApiKey, setPresetApiKey, addingPresetModels, setAddingPresetModels, showCustomModel, setShowCustomModel, editingModel, setEditingModel, testingModelId, setTestingModelId, selectedModelConnectionIds, setSelectedModelConnectionIds, modelMode, setModelMode, setNotice, setTab, loadModelStatus, deleteBatch, setAllSelectedIds, toggleSelectedId }: ModelsPanelProps) {
   async function testModel(id?: number) {
-    setTestingModel(true);
-    const response = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
-    const data = await response.json();
-    setNotice(data.message || (response.ok ? "连接成功" : "连接失败"));
-    setTestingModel(false);
+    // 用正在测试的连接 id 标记 loading，避免全局布尔让所有「测试」按钮一起变灰
+    setTestingModelId(id ?? -1);
+    try {
+      const response = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const data = await response.json();
+      setNotice(data.message || (response.ok ? "连接成功" : "连接失败"));
+    } finally {
+      setTestingModelId(null);
+    }
   }
 
   async function deleteModelConnection(item: ModelConnection) {
@@ -54,11 +58,12 @@ export default function ModelsPanel({ modelStatus, selectedPresetModels, setSele
 
   async function saveModelConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const form = event.currentTarget;  // await 后 currentTarget 会被置空，先存引用
+    const values = Object.fromEntries(new FormData(form).entries());
     const response = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...values, id: editingModel?.id, action: "save" }) });
     const data = await response.json();
     setNotice(data.message || (response.ok ? "模型API已保存" : "保存失败"));
-    if (response.ok) { event.currentTarget.reset(); setEditingModel(null); await loadModelStatus(); }
+    if (response.ok) { form.reset(); setEditingModel(null); await loadModelStatus(); }
   }
 
   function togglePresetModel(model: string) {
@@ -132,7 +137,7 @@ export default function ModelsPanel({ modelStatus, selectedPresetModels, setSele
         <span className="customModelToggleAction">{showCustomModel||editingModel?<><ChevronUpIcon style={{ width: 12, height: 12 }} /> 收起</>:<><ChevronDownIcon style={{ width: 12, height: 12 }} /> 展开添加</>}</span>
       </button>
       {(showCustomModel||editingModel)&&<form key={editingModel?.id||"new"} className="userForm modelForm" onSubmit={saveModelConfig}><input type="hidden" name="id" value={editingModel?.id||""}/><label>连接名称<input name="connectionName" required defaultValue={editingModel ? cleanModelText(editingModel.connectionName, editingModel.model) : ""} placeholder="例如：Claude 合同审查"/></label><label>模型供应商<select name="provider" required defaultValue={editingModel ? inferModelProvider(editingModel.model) : "Anthropic Claude"}><option>Anthropic Claude</option><option>Google Gemini</option><option>OpenAI</option><option>DeepSeek</option><option>通义千问</option><option>智谱 AI</option><option>月之暗面</option><option>MiniMax</option><option>豆包</option><option>OpenRouter</option><option>硅基流动</option><option>自建模型</option></select></label><label>API 接口地址<input name="baseUrl" type="url" required value="https://claudecc.top" readOnly aria-readonly="true" title="所有模型统一使用该接口地址"/></label><label>模型名称<input name="model" required defaultValue={editingModel?.model||""} placeholder="填写新模型的准确名称"/></label><label>API Key<input name="apiKey" type="password" required={!editingModel} autoComplete="new-password" placeholder={editingModel?"不修改密钥可留空":"填写该供应商发放的 API Key"}/></label><button type="submit">{editingModel?"保存修改":<><PlusIcon style={{ width: 12, height: 12 }} /> 添加自定义模型</>}</button>{editingModel&&<button type="button" className="outline" onClick={()=>setEditingModel(null)}>取消编辑</button>}</form>}
-      {!!modelStatus?.connections?.length&&<><div className="bulkActionBar"><label><input type="checkbox" checked={modelStatus.connections.every(item=>selectedModelConnectionIds.includes(item.id))} onChange={event=>setAllSelectedIds(modelStatus.connections.map(item=>item.id),setSelectedModelConnectionIds,event.target.checked)}/>全选</label><button className="dangerButton" disabled={!selectedModelConnectionIds.length} onClick={deleteSelectedModelConnections}>删除选中（{selectedModelConnectionIds.length}）</button></div><div className="modelConnectionList">{modelStatus.connections.map(item=><article key={item.id}><span className="providerMark">{modelProviderMark(item)}</span><div><b>{formatModelOption(item)}</b><p>{inferModelProvider(item.model)} - {item.model}</p><small>{item.baseUrl}</small></div><em>已加密</em><button className="outline" onClick={()=>setEditingModel(item)}>编辑</button><button className="outline" onClick={()=>testModel(item.id)} disabled={testingModel}>{testingModel?"检测中…":"测试"}</button><label className="itemSelect"><input type="checkbox" checked={selectedModelConnectionIds.includes(item.id)} onChange={()=>toggleSelectedId(selectedModelConnectionIds,setSelectedModelConnectionIds,item.id)}/>选择</label><button className="dangerButton" onClick={()=>deleteModelConnection(item)}>删除</button></article>)}</div></>}
+      {!!modelStatus?.connections?.length&&<><div className="bulkActionBar"><label><input type="checkbox" checked={modelStatus.connections.every(item=>selectedModelConnectionIds.includes(item.id))} onChange={event=>setAllSelectedIds(modelStatus.connections.map(item=>item.id),setSelectedModelConnectionIds,event.target.checked)}/>全选</label><button className="dangerButton" disabled={!selectedModelConnectionIds.length} onClick={deleteSelectedModelConnections}>删除选中（{selectedModelConnectionIds.length}）</button></div><div className="modelConnectionList">{modelStatus.connections.map(item=><article key={item.id}><span className="providerMark">{modelProviderMark(item)}</span><div><b>{formatModelOption(item)}</b><p>{inferModelProvider(item.model)} - {item.model}</p><small>{item.baseUrl}</small></div><em>已加密</em><button className="outline" onClick={()=>setEditingModel(item)}>编辑</button><button className="outline" onClick={()=>testModel(item.id)} disabled={testingModelId===item.id}>{testingModelId===item.id?"检测中…":"测试"}</button><label className="itemSelect"><input type="checkbox" checked={selectedModelConnectionIds.includes(item.id)} onChange={()=>toggleSelectedId(selectedModelConnectionIds,setSelectedModelConnectionIds,item.id)}/>选择</label><button className="dangerButton" onClick={()=>deleteModelConnection(item)}>删除</button></article>)}</div></>}
     </div>
   </section>;
 }

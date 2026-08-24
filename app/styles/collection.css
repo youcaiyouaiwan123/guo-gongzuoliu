@@ -289,7 +289,8 @@
   padding-top: 8px;
   border-top: 1px solid #f0f4f1;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .sourceCard .cardActions.compact button {
   flex: 0 0 auto;

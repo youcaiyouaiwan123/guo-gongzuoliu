@@ -6,8 +6,15 @@ import { log } from "./features/logger";
 export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?: boolean }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [notice, setNotice] = useState("");
+  const [email, setEmail] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
   const adminOnly = initialAdminOnly;
   const title = adminOnly ? "后台管理员登录" : "企业用户登录";
+
+  // 密码强度：按长度 + 字符类别（小写/大写/数字/符号）粗评，只做前端提示，不阻断后端校验。
+  const strength = passwordStrength(pwd);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -29,26 +36,31 @@ export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?:
     window.location.href = data.redirect || "/";
   }
 
-  async function requestCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // 发送验证码：不再是独立表单，读共享的 email 状态即可，避免注册区出现两个邮箱框。
+  async function requestCode() {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setNotice("请先填写有效邮箱。"); return; }
+    setSendingCode(true);
     setNotice("正在发送验证码…");
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    log.info("注册验证码请求", { email: values.email });
+    log.info("注册验证码请求", { email });
     const response = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "requestCode", ...values }),
+      body: JSON.stringify({ action: "requestCode", email: email.trim() }),
     });
     const data = await response.json().catch(() => ({}));
     setNotice(response.ok ? data.message || "验证码已发送。" : data.error || "验证码发送失败。");
-    if (response.ok) log.info("验证码已发送", { email: values.email });
-    else log.warn("验证码发送失败", { email: values.email, error: data.error });
+    if (response.ok) log.info("验证码已发送", { email });
+    else log.warn("验证码发送失败", { email, error: data.error });
+    setSendingCode(false);
   }
 
   async function verify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setNotice("正在完成注册…");
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const password = String(values.password || "");
+    if (password.length < 8) { setNotice("密码至少需要 8 位。"); return; }
+    if (password !== String(values.confirmPassword || "")) { setNotice("两次输入的密码不一致。"); return; }
+    setNotice("正在完成注册…");
     log.info("注册验证", { email: values.email });
     const response = await fetch("/api/auth/register", {
       method: "POST",
@@ -57,7 +69,7 @@ export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?:
     });
     const data = await response.json().catch(() => ({}));
     setNotice(response.ok ? data.message || "注册成功，请登录。" : data.error || "注册失败。");
-    if (response.ok) { log.info("注册成功", { email: values.email }); setMode("login"); }
+    if (response.ok) { log.info("注册成功", { email: values.email }); setEmail(""); setPwd(""); setConfirmPwd(""); setMode("login"); }
     else log.warn("注册失败", { email: values.email, error: data.error });
   }
 
@@ -97,40 +109,48 @@ export function LoginAuthCard({ initialAdminOnly = false }: { initialAdminOnly?:
         )}
 
         {mode === "register" && (
-          <div className="authRegisterGrid">
-            <form onSubmit={requestCode} className="featureForm">
-              <label>
-                邮箱
-                <input name="email" type="email" required placeholder="name@company.com" />
-              </label>
-              <button type="submit">发送验证码</button>
-            </form>
-            <form onSubmit={verify} className="featureForm">
-              <label>
-                邮箱
-                <input name="email" type="email" required placeholder="name@company.com" />
-              </label>
-              <label>
-                验证码
-                <input name="code" required placeholder="6 位验证码" />
-              </label>
-              <label>
-                姓名
-                <input name="displayName" placeholder="可选" />
-              </label>
-              <label>
-                密码
-                <input name="password" type="password" required minLength={8} />
-              </label>
-              <button type="submit">完成注册</button>
-            </form>
-          </div>
+          <form onSubmit={verify} className="featureForm authRegisterGrid">
+            <label>
+              邮箱
+              <div className="emailWithAction">
+                <input name="email" type="email" required placeholder="name@company.com" value={email} onChange={e => setEmail(e.target.value)} />
+                <button type="button" className="ghostAction" disabled={sendingCode} onClick={requestCode}>{sendingCode ? "发送中…" : "发送验证码"}</button>
+              </div>
+            </label>
+            <label>
+              验证码
+              <input name="code" required placeholder="6 位验证码" />
+            </label>
+            <label>
+              姓名
+              <input name="displayName" placeholder="可选" />
+            </label>
+            <label>
+              密码
+              <input name="password" type="password" required minLength={8} value={pwd} onChange={e => setPwd(e.target.value)} placeholder="至少 8 位" />
+            </label>
+            {pwd && <p className={`pwdStrength ${strength.level}`}><i /><span>密码强度：{strength.label}</span></p>}
+            <label>
+              确认密码
+              <input name="confirmPassword" type="password" required minLength={8} value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} placeholder="再次输入密码" />
+            </label>
+            {confirmPwd && confirmPwd !== pwd && <p className="pwdMismatch">两次输入的密码不一致</p>}
+            <button type="submit">完成注册</button>
+          </form>
         )}
 
         {notice && <p className="noticeLine">{notice}</p>}
         <small>邮箱登录使用验证码激活；管理员登录必须拥有管理员角色。</small>
       </section>
   );
+}
+
+// 密码强度粗评：长度达标 + 命中的字符类别数，映射到 弱/中/强。仅前端提示用。
+function passwordStrength(value: string): { level: "weak" | "medium" | "strong"; label: string } {
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^a-zA-Z0-9]/].filter(re => re.test(value)).length;
+  if (value.length < 8 || classes <= 1) return { level: "weak", label: "弱（建议混合字母、数字与符号）" };
+  if (value.length >= 12 && classes >= 3) return { level: "strong", label: "强" };
+  return { level: "medium", label: "中" };
 }
 
 export default function AuthPage({ adminOnly = false }: { adminOnly?: boolean }) {

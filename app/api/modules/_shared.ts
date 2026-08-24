@@ -13,7 +13,7 @@ type RuntimeEnv = {
   COLLECTOR_PROXY_URL?: string;
 };
 type NodeType = "input" | "knowledge" | "agent" | "data" | "ai" | "review" | "approval" | "save" | "output";
-type WorkflowNode = { id: string; type: NodeType; name: string; config?: string; modelMode?: string; parallelGroup?: string; inputMode?: "prompt" | "markdown" | "skill" | "direct"; promptGuide?: { role?: string; task?: string; context?: string; constraint?: string; format?: string; example?: string }; resourceTitle?: string; resourceContent?: string };
+type WorkflowNode = { id: string; type: NodeType; name: string; config?: string; modelMode?: string; parallelGroup?: string; inputMode?: "prompt" | "markdown" | "skill" | "direct"; promptGuide?: { role?: string; task?: string; context?: string; constraint?: string; format?: string; example?: string }; resourceTitle?: string; resourceContent?: string; knowledgeScope?: "all" | "enterprise" | "personal"; knowledgePick?: "library" | "files"; knowledgeDocs?: string[] };
 type WorkflowRow = { id: number; name: string; steps: string; reviewStandard: string; maxLoops: number; goal?: string; stopCondition?: string; loopType?: string };
 type WorkflowRunOptions = { runId?: number; startIndex?: number; current?: string; conversationId?: number; sourceChannel?: string };
 const runtime = env as unknown as RuntimeEnv;

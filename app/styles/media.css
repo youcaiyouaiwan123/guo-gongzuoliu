@@ -172,7 +172,7 @@
   font-weight: 700;
 }
 
-/* 内容区：弹性占满剩余高度，不滚动 */
+/* 内容区：弹性占满剩余高度 */
 .mediaPanel .mediaGeneratorBody,
 .mediaPanel .mediaVideoBody,
 .mediaPanel .mediaResultBody {
@@ -182,6 +182,15 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 文生图 / 生成结果：三列被强制等高，内容（结构化字段、优化行、优化结果与消息、
+   结果图网格）超过卡片高度时，原来的 overflow:hidden 会把底部文字裁掉、看起来像被
+   下方控件遮住。这里改为纵向滚动，让超出部分可滚出来而非被裁切。 */
+.mediaPanel .mediaGeneratorBody,
+.mediaPanel .mediaResultBody {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ---------- 3. 文生图：横向 tab 滚动布局 ---------- */

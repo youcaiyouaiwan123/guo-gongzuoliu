@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { OrgMember, OrgReport, OrgUnit, TransferRequest } from "../shared-types";
 import { unitMark } from "../shared-utils";
 import { PlusIcon } from "../../components/icons";
+import { Pager } from "../Pager";
+import { usePaged } from "../usePaged";
 
 type OrgModalType = "unit" | "member" | "transfer" | "report" | null;
 type OrgTab = "manage" | "chart" | "reports";
@@ -38,6 +40,8 @@ export default function OrganizationPanel({ orgUnits, orgMembers, orgOwner, myMe
   const [expandedUnitIds, setExpandedUnitIds] = useState<number[]>([]);
   const selectedUnit = orgUnits.find(unit => unit.id === selectedUnitId) || null;
   const selectedMembers = orgMembers.filter(member => member.unitId === selectedUnitId && (!memberQuery.trim() || `${member.email} ${member.jobTitle}`.toLowerCase().includes(memberQuery.trim().toLowerCase())));
+  const pagedMembers = usePaged(selectedMembers, 8);
+  const pagedReports = usePaged(orgReports, 8);
 
   // unitName 来自 LEFT JOIN，成员挂在已删除部门上时为 null；
   // 直接插进模板字符串会在界面上渲染出字面量 "null"。
@@ -118,7 +122,7 @@ export default function OrganizationPanel({ orgUnits, orgMembers, orgOwner, myMe
     if (response.ok) await Promise.all([loadOrganization(), loadState()]);
   }
 
-  return <section className="contentPanel orgPage">
+  return <section className="contentPanel pageFill orgPage">
     {/* 顶部：3 统计 + 操作按钮（单行紧凑） */}
     <header className="orgHeader">
       <div className="metricRow compact">
@@ -153,7 +157,7 @@ export default function OrganizationPanel({ orgUnits, orgMembers, orgOwner, myMe
           </div>
           <aside className="orgSide">
             <div className="departmentHead"><div><small>当前选择</small><h3>{selectedUnit?.name||"请选择部门"}</h3>{selectedUnit&&<p>{selectedUnit.unitType} · 负责人：{selectedUnit.managerEmail||"待设置"} · {orgMembers.filter(member=>member.unitId===selectedUnit.id).length}人</p>}</div>{appRole==="管理员"&&selectedUnit&&<div><button onClick={()=>{setEditingUnit(selectedUnit);setOrgModal("unit")}}>编辑组织</button><button className="dangerButton" onClick={()=>deleteOrgUnit(selectedUnit)}>删除组织</button></div>}</div>
-            {selectedUnit&&<><input className="memberSearch" value={memberQuery} onChange={event=>setMemberQuery(event.target.value)} placeholder="搜索姓名邮箱或岗位"/><div className="departmentMembers">{selectedMembers.length?selectedMembers.map(member=><article key={member.email}><div><b>{member.jobTitle}</b><span>{member.email}</span>{member.email===orgOwner&&<strong className="ownerBadge">老板</strong>}</div>{appRole==="管理员"&&<div className="departmentMemberActions"><button onClick={()=>{setEditingMember(member);setOrgModal("member")}}>调整岗位</button>{member.email!==orgOwner?<><button onClick={()=>manageOrgMember(member,"removeMember")}>移出部门</button><button className="dangerButton" onClick={()=>manageOrgMember(member,"offboardMember")}>办理离职</button></>:<span className="ownerProtected">最高权限保护</span>}</div>}</article>):<div className="emptyMini"><b>暂无匹配成员</b><p>可以点击上方“分配成员”加入该部门。</p></div>}</div></>}
+            {selectedUnit&&<><input className="memberSearch" value={memberQuery} onChange={event=>setMemberQuery(event.target.value)} placeholder="搜索邮箱或岗位"/><div className="departmentMembers">{selectedMembers.length?pagedMembers.pageItems.map(member=><article key={member.email}><div><b>{member.jobTitle}</b><span>{member.email}</span>{member.email===orgOwner&&<strong className="ownerBadge">老板</strong>}</div>{appRole==="管理员"&&<div className="departmentMemberActions"><button onClick={()=>{setEditingMember(member);setOrgModal("member")}}>调整岗位</button>{member.email!==orgOwner?<><button onClick={()=>manageOrgMember(member,"removeMember")}>移出部门</button><button className="dangerButton" onClick={()=>manageOrgMember(member,"offboardMember")}>办理离职</button></>:<span className="ownerProtected">最高权限保护</span>}</div>}</article>):<div className="emptyMini"><b>暂无匹配成员</b><p>可以点击上方“分配成员”加入该部门。</p></div>}</div><Pager page={pagedMembers.page} pageSize={pagedMembers.pageSize} total={pagedMembers.total} onChange={pagedMembers.setPage} /></>}
             <div className="orgSideDivider"/>
             <h3>我的组织关系</h3>
             {myMember?<div className="myOrgCard"><span>{unitNameOf(myMember)}</span><b>{myMember.jobTitle}</b><p>直属上级：{myMember.directManagerEmail||"按部门负责人逐级汇报"}</p></div>:<div className="emptyMini"><b>未加入部门</b><p>选择部门后提交申请，负责人审批后生效。</p></div>}
@@ -173,7 +177,7 @@ export default function OrganizationPanel({ orgUnits, orgMembers, orgOwner, myMe
 
       {tab==="reports" && <div className="orgReportsSection">
         <div className="subTitle"><div><h3>逐级汇报与重要文件</h3></div>{reportRecipients.length>0&&<button onClick={()=>setOrgModal("report")}><PlusIcon style={{ width: 12, height: 12 }} /> 新建汇报</button>}</div>
-        <div className="reportGrid">{orgReports.length?orgReports.map(report=><article key={report.id} className={report.importance==="重要"?"importantReport":""}><div className="reportHead"><span>{report.importance}</span><em className={`approvalState ${report.status}`}>{report.status}</em></div><h3>{report.title}</h3><p>{report.aiSummary||report.content}</p>{report.aiSummary&&<details><summary>查看员工原始汇报</summary><p>{report.content}</p></details>}{report.attachmentDocumentId&&<a href={`/api/state?download=${report.attachmentDocumentId}`}>下载汇报附件</a>}<small>{report.senderEmail} → {report.recipientEmail} · {new Date(report.createdAt).toLocaleString("zh-CN")}</small>{report.senderEmail!==userEmail&&report.status==="未读"&&<button onClick={()=>handleReport(report.id)}>标记已处理</button>}</article>):<div className="emptyState"><b>还没有逐级汇报</b></div>}</div>
+        <div className="reportGrid">{orgReports.length?pagedReports.pageItems.map(report=><article key={report.id} className={report.importance==="重要"?"importantReport":""}><div className="reportHead"><span>{report.importance}</span><em className={`approvalState ${report.status}`}>{report.status}</em></div><h3>{report.title}</h3><p>{report.aiSummary||report.content}</p>{report.aiSummary&&<details><summary>查看员工原始汇报</summary><p>{report.content}</p></details>}{report.attachmentDocumentId&&<a href={`/api/state?download=${report.attachmentDocumentId}`}>下载汇报附件</a>}<small>{report.senderEmail} → {report.recipientEmail} · {new Date(report.createdAt).toLocaleString("zh-CN")}</small>{report.senderEmail!==userEmail&&report.status==="未读"&&<button onClick={()=>handleReport(report.id)}>标记已处理</button>}</article>):<div className="emptyState"><b>还没有逐级汇报</b></div>}</div><Pager page={pagedReports.page} pageSize={pagedReports.pageSize} total={pagedReports.total} onChange={pagedReports.setPage} />
       </div>}
     </div>
   </section>;

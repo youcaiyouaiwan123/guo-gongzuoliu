@@ -1757,8 +1757,25 @@
   font-size: 11px !important;
 }
 .monitoringPage .featureForm button {
+  grid-column: 1 / -1;
+  justify-self: start;
   padding: 8px 16px !important;
   font-size: 12px !important;
+  font-weight: 600 !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  background: linear-gradient(135deg, #08765a, #064d3c) !important;
+  color: #fff !important;
+  cursor: pointer;
+  margin: 0 !important;
+}
+.monitoringPage .featureForm button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0a8a6a, #075f49) !important;
+  box-shadow: 0 3px 8px rgba(15, 105, 78, 0.2);
+}
+.monitoringPage .featureForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .monitoringPage .dashboardBoard {
   padding: 14px !important;
@@ -1829,6 +1846,16 @@ section.artifactsLayout.pageFill {
   grid-template-columns: 300px minmax(0, 1fr) !important;
   padding: 14px 18px !important;
   gap: 16px !important;
+}
+/* 窄屏：上面的 !important 会压过 artifacts.css 里 ≤980px 的单列响应式，
+   这里同样用 !important + 媒体查询把沉淀页收成单列并允许纵向滚动，
+   否则手机宽度下 300px 侧栏 + 网格超出可视宽被裁切且无法滚动、内容丢失。 */
+@media (max-width: 980px) {
+  section.artifactsLayout.pageFill {
+    grid-template-columns: 1fr !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
 }
 
 /* 响应式 */

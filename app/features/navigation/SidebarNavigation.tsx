@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { navigationGroupKeyForTab, navigationGroupsForRole } from "../constants";
-import { log } from "../logger";
 import type { NavigationIconName } from "../constants";
 import type { Tab } from "../shared-types";
 

@@ -228,19 +228,53 @@ export async function executeWorkflow(workflow: WorkflowRow, actor: string, role
             current = `${structured ? `${structured}\n\n` : ""}【本次输入】\n${seed}`;
           }
         } else if (node.type === "knowledge") {
-          const words = Array.from(new Set((`${seed} ${node.config || ""}`).match(/[\u4e00-\u9fff]{2,}|[a-zA-Z0-9_-]{3,}/g) || [])).slice(0, 5);
-          let sql = "SELECT title,content FROM knowledge_documents WHERE (visibility='全员' OR visibility=? OR (visibility='部门' AND department_id=?))";
-          const binds: unknown[] = [role, membership?.unitId || -1];
-          if (words.length) {
-            sql += ` AND (${words.map(() => "(title LIKE ? OR content LIKE ?)").join(" OR ")})`;
-            words.forEach(word => { binds.push(`%${word}%`, `%${word}%`); });
+          // 知识检索节点=“知识库数据源”：每次运行都实时查询当前知识库内容。
+          // 两种模式：files=只读用户勾选的具体文件；library=按 scope 读整库（旧行为）。
+          // 无论哪种模式，权限都在后端重校：企业文档重查 visibility、个人知识限定 owner_email=actor，
+          // 前端勾选只是便利，伪造 id 读不到无权文件。
+          if (node.knowledgePick === "files" && node.knowledgeDocs?.length) {
+            // 带前缀 id：e:<id>=企业 knowledge_documents、p:<id>=个人 personal_knowledge。
+            // Number 化并过滤成正整数，杜绝把非法值拼进 IN 子句。
+            const entIds = node.knowledgeDocs.filter(x => x.startsWith("e:")).map(x => Number(x.slice(2))).filter(n => Number.isInteger(n) && n > 0);
+            const perIds = node.knowledgeDocs.filter(x => x.startsWith("p:")).map(x => Number(x.slice(2))).filter(n => Number.isInteger(n) && n > 0);
+            let context = "";
+            let personalContext = "";
+            if (entIds.length) {
+              // 沿用整库同款 visibility 权限条件，无权文档即使被勾选也查不出。
+              const sql = `SELECT title,content FROM knowledge_documents WHERE id IN (${entIds.map(() => "?").join(",")}) AND (visibility='全员' OR visibility=? OR (visibility='部门' AND department_id=?)) ORDER BY updated_at DESC,id DESC LIMIT 20`;
+              const docs = await runtime.DB.prepare(sql).bind(...entIds, role, membership?.unitId || -1).all<{ title: string; content: string }>();
+              context = docs.results.map(d => `【企业知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
+            }
+            if (perIds.length) {
+              const sql = `SELECT title,content FROM personal_knowledge WHERE id IN (${perIds.map(() => "?").join(",")}) AND owner_email=? ORDER BY updated_at DESC,id DESC LIMIT 20`;
+              const personal = await runtime.DB.prepare(sql).bind(...perIds, actor).all<{ title: string; content: string }>();
+              personalContext = personal.results.map(d => `【个人知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
+            }
+            current = `${current}\n\n--- 授权知识检索结果 ---\n${[context, personalContext].filter(Boolean).join("\n\n") || "未检索到匹配资料"}`;
+          } else {
+          // scope 决定检索哪些知识库：all=企业+个人、enterprise=仅企业、personal=仅个人。
+          // 个人知识始终限定 owner_email=actor，工作流不能越权读他人的私有沉淀。
+          const scope = node.knowledgeScope || "all";
+          const words = Array.from(new Set((`${seed} ${node.config || ""}`).match(/[一-鿿]{2,}|[a-zA-Z0-9_-]{3,}/g) || [])).slice(0, 5);
+          let context = "";
+          let personalContext = "";
+          if (scope !== "personal") {
+            let sql = "SELECT title,content FROM knowledge_documents WHERE (visibility='全员' OR visibility=? OR (visibility='部门' AND department_id=?))";
+            const binds: unknown[] = [role, membership?.unitId || -1];
+            if (words.length) {
+              sql += ` AND (${words.map(() => "(title LIKE ? OR content LIKE ?)").join(" OR ")})`;
+              words.forEach(word => { binds.push(`%${word}%`, `%${word}%`); });
+            }
+            sql += " ORDER BY updated_at DESC,id DESC LIMIT 6";
+            const docs = await runtime.DB.prepare(sql).bind(...binds).all<{ title: string; content: string }>();
+            context = docs.results.map(d => `【企业知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
           }
-          sql += " ORDER BY updated_at DESC,id DESC LIMIT 6";
-          const docs = await runtime.DB.prepare(sql).bind(...binds).all<{ title: string; content: string }>();
-          const personal = await runtime.DB.prepare("SELECT title,content FROM personal_knowledge WHERE owner_email=? ORDER BY updated_at DESC,id DESC LIMIT 6").bind(actor).all<{ title: string; content: string }>();
-          const context = docs.results.map(d => `【企业知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
-          const personalContext = personal.results.map(d => `【个人知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
+          if (scope !== "enterprise") {
+            const personal = await runtime.DB.prepare("SELECT title,content FROM personal_knowledge WHERE owner_email=? ORDER BY updated_at DESC,id DESC LIMIT 6").bind(actor).all<{ title: string; content: string }>();
+            personalContext = personal.results.map(d => `【个人知识：${d.title}】\n${d.content.slice(0, 2500)}`).join("\n\n");
+          }
           current = `${current}\n\n--- 授权知识检索结果 ---\n${[context,personalContext].filter(Boolean).join("\n\n") || "未检索到匹配资料"}`;
+          }
         } else if (node.type === "ai") {
           const prepared = prepareAiNode(node, current);
           current = await askModel(actor, prepared.instruction, prepared.content, node.modelMode || "auto");

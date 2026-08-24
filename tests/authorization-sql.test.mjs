@@ -297,7 +297,7 @@ test("登录与注册接口均已接入限流", async () => {
   const register = await source("app/api/auth/register/route.ts");
   assert.match(register, /consumeAttempt\(db, REGISTER_CODE_RULE, email\)/, "索取验证码必须限流。");
   assert.match(register, /consumeAttempt\(db, REGISTER_VERIFY_RULE, email\)/, "校验验证码必须限流。");
-  assert.ok(register.indexOf("consumeAttempt(db, REGISTER_VERIFY_RULE") < register.indexOf("if (inputHash !== row.codeHash)"), "限流必须发生在验证码比对之前。");
+  assert.ok(register.indexOf("consumeAttempt(db, REGISTER_VERIFY_RULE") < register.indexOf("inputHash !== row.codeHash"), "限流必须发生在验证码比对之前。");
 
   const rules = await source("app/api/_throttle.ts");
   assert.match(rules, /LOGIN_RULE[^=]*=\s*\{ scope: "login", limit: 5, windowSeconds: 900, lockSeconds: 900 \}/, "登录限流参数被改动，请同步确认是否仍满足要求。");

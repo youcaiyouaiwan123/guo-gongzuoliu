@@ -14,6 +14,10 @@ services:
       MODEL_NAME: ${MODEL_NAME:-gpt-5.5}
       MODEL_RELAY_URL: http://model-relay:8789/v1/chat/completions
       COLLECTOR_PROXY_URL: http://model-relay:8789/collector/fetch
+      # 发信：app 只需 MAIL_HOST/MAIL_SENDER 用于「是否已配置」的门槛与后台状态展示，
+      # 真正的发信密钥（MAIL_PASS）只给网关，不进 worker。
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_SENDER: ${MAIL_USER:-}
     volumes:
       - haixin_app_data:/data
     expose:
@@ -49,6 +53,12 @@ services:
       HAIXIN_GATEWAY_ACCOUNTS_URL: http://app:3000/api/gateway/accounts
       HAIXIN_GATEWAY_ADMIN_SECRET: ${HAIXIN_GATEWAY_ADMIN_SECRET:?HAIXIN_GATEWAY_ADMIN_SECRET is required}
       PORT: "8788"
+      # 发信凭据只落在网关：网关消费 mail_outbox，用 node:tls 直连 SMTP 投出验证码邮件。
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-465}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASS: ${MAIL_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     expose:
       - "8788"
 

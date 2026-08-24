@@ -1545,9 +1545,6 @@
   .conversationPanel {
     max-height: 170px;
   }
-  .conversationList {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .chatPanel {
     min-height: 360px;
   }
@@ -2339,5 +2336,28 @@
     flex: 1;
     min-width: 88px;
   }
+}
+
+/* 合同中心两个主操作按钮（保存模板并识别变量 / 生成合同）原来是裸 <button>，
+   没有任何视觉样式，渲染成浏览器默认灰按钮。补一套与全站一致的绿色主按钮样式，
+   作用域限定在 .contractPage，不影响其它页面。 */
+.contractPage .primaryButton {
+  align-self: start;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #08765a, #064d3c);
+  color: #fff;
+  cursor: pointer;
+}
+.contractPage .primaryButton:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0a8a6a, #075f49);
+  box-shadow: 0 3px 8px rgba(15, 105, 78, 0.2);
+}
+.contractPage .primaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 

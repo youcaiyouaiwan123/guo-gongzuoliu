@@ -5,6 +5,8 @@ import * as XLSX from "xlsx";
 import type { CollectionRun, Source } from "../shared-types";
 import { collectorModeLabel, outputFormatLabel, platformLabel, sourceIcon, statusClassName, targetStoreLabel } from "../shared-utils";
 import { PlayIcon, PlusIcon } from "../../components/icons";
+import { Pager } from "../Pager";
+import { usePaged } from "../usePaged";
 
 type ModuleName = "agent" | "workflow" | "source";
 type CollectionTab = "sources" | "cleaning";
@@ -57,6 +59,8 @@ export interface CollectionPanelProps {
 
 export default function CollectionPanel({ sources, collectionRuns, selectedSourceIds, selectedCollectionRunIds, selectedCollectionRun, runningSourceId, cleaningRules, cleanedPreview, showCleaning, localCleaningFile, localCleaningBusy, setSelectedSourceIds, setSelectedCollectionRunIds, setSelectedCollectionRun, setRunningSourceId, setCleaningRules, setCleanedPreview, setShowCleaning, setLocalCleaningFile, setLocalCleaningBusy, setCollectionRuns, setNotice, setAllSelectedIds, toggleSelectedId, runModule, deleteModule, deleteSelectedModules, loadModules, loadState, loadPersonalKnowledge, deleteBatch, modelModeLabel, newSourceTask, openSourceEditor }: CollectionPanelProps) {
   const [tab, setTab] = useState<CollectionTab>("sources");
+  const pagedSources = usePaged(sources, 9);
+  const pagedRuns = usePaged(collectionRuns, 10);
   const [showAiCollect, setShowAiCollect] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiUrl, setAiUrl] = useState("");
@@ -256,7 +260,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
     setNotice(`已删除 ${result.ok} 条采集日志${result.failed ? `，${result.failed} 条失败` : ""}`);
   }
 
-  return <section className="contentPanel collectionLayout">
+  return <section className="contentPanel pageFill collectionLayout">
     {/* 顶部：3 统计 + 4 模式（单行紧凑） */}
     <div className="collectionHeader">
       <div className="metricRow compact">
@@ -321,7 +325,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
           </div>
         )}
         <div className="sourceGrid compact">
-          {sources.length ? sources.map(s => (
+          {sources.length ? pagedSources.pageItems.map(s => (
             <article key={s.id} className="sourceCard">
               <div className="cardTop">
                 <span className="moduleIcon">{sourceIcon(s.sourceType)}</span>
@@ -344,16 +348,11 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
                 </button>
                 <button type="button" className="outline" disabled={runningSourceId === s.id} onClick={() => testSource(s.id, s.name)}>测试连接</button>
                 <button type="button" className="outline" onClick={() => openSourceEditor(s)}>编辑</button>
-                <span className="cardMenuWrap">
-                  ⋮
-                  <div className="menu" role="menu">
-                    <label className="itemSelect">
-                      <input type="checkbox" checked={selectedSourceIds.includes(s.id)} onChange={() => toggleSelectedId(selectedSourceIds, setSelectedSourceIds, s.id)} />
-                      选择
-                    </label>
-                    <button type="button" className="dangerButton" onClick={() => deleteModule("source", s.id, s.name)}>删除</button>
-                  </div>
-                </span>
+                <label className="itemSelect">
+                  <input type="checkbox" checked={selectedSourceIds.includes(s.id)} onChange={() => toggleSelectedId(selectedSourceIds, setSelectedSourceIds, s.id)} />
+                  选择
+                </label>
+                <button type="button" className="dangerButton" onClick={() => deleteModule("source", s.id, s.name)}>删除</button>
               </div>
             </article>
           )) : (
@@ -363,6 +362,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
             </div>
           )}
         </div>
+        <Pager page={pagedSources.page} pageSize={pagedSources.pageSize} total={pagedSources.total} onChange={pagedSources.setPage} />
       </div>
     )}
 
@@ -456,7 +456,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
               </button>
             </div>
             <div className="collectionRunList compact">
-              {collectionRuns.map(run => (
+              {pagedRuns.pageItems.map(run => (
                 <article
                   key={run.id}
                   role="button"
@@ -476,6 +476,7 @@ export default function CollectionPanel({ sources, collectionRuns, selectedSourc
                 </article>
               ))}
             </div>
+            <Pager page={pagedRuns.page} pageSize={pagedRuns.pageSize} total={pagedRuns.total} onChange={pagedRuns.setPage} />
           </>
         )}
       </div>

@@ -2,7 +2,7 @@
 
 import type { Permission, PermissionCapability, PermissionCapabilityGroup, PermissionRoleSpec } from "../shared-types";
 import { buildPermissionDrafts, permissionKey } from "../shared-utils";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WaveIcon, MessageIcon, BoltIcon, SparklesIcon, DiamondIcon, ClipboardIcon, BellIcon, RefreshIcon, ChevronDownIcon, ChevronUpIcon } from "../../components/icons";
 
 export interface PermissionsPanelProps {
@@ -64,7 +64,10 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
   const [activePage, setActivePage] = useState<string>("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => buildGroups(capabilityGroups), [capabilityGroups]);
-  if (activePage === "" && groups[0]) setActivePage(groups[0].id);
+  // 首次拿到分组后再定位到第一个页签；放进 effect，避免在 render 期直接 setState。
+  useEffect(() => {
+    if (activePage === "" && groups[0]) setActivePage(groups[0].id);
+  }, [activePage, groups]);
 
   // 取"非锁定"角色（普通员工）作为主操作对象；锁定角色（管理员）只读展示。
   const staffRole = roles.find(role => !role.locked);
@@ -248,7 +251,7 @@ export default function PermissionsPanel({ permissions, permissionDrafts, setPer
                 <h3>{role.label}</h3>
                 <p>{role.description}</p>
               </div>
-              <span className={`permissionsRoleBadge ${isLocked ? "isFixed" : permissionDirty ? "isDirty" : "isFixed"}`}>
+              <span className={`permissionsRoleBadge ${!isLocked && permissionDirty ? "isDirty" : "isFixed"}`}>
                 {isLocked ? "已固定" : permissionDirty ? "有未保存" : "已同步"}
               </span>
             </div>
